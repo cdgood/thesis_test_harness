@@ -1,5 +1,5 @@
 {
-    "3d_cnn_pca_component_20":{
+    "2d_cnn_hs_pca_component_20":{
         "cuda": 0,
         "restore": null,
         "output_path": null,
@@ -8,7 +8,7 @@
         "skip_data_preprocessing": false,
         "skip_band_selection": false,
         "skip_data_postprocessing": true,
-        "model_id": "3d-cnn",
+        "model_id": "2d-cnn",
         "random_seed": 123,
         "epochs": 3,
         "batch_size": 32,
@@ -59,7 +59,7 @@
         "band_reduction_method": "pca",
         "n_components": 20
     },
-    "3d_cnn_ica_component_20":{
+    "2d_cnn_hs_ica_component_20":{
         "cuda": 0,
         "restore": null,
         "output_path": null,
@@ -68,7 +68,7 @@
         "skip_data_preprocessing": false,
         "skip_band_selection": false,
         "skip_data_postprocessing": true,
-        "model_id": "3d-cnn",
+        "model_id": "2d-cnn",
         "random_seed": 123,
         "epochs": 3,
         "batch_size": 32,
@@ -119,7 +119,7 @@
         "band_reduction_method": "ica",
         "n_components": 20
     },
-    "3d_cnn_no_dim_reduction":{
+    "2d_cnn_hs_no_dim_reduction":{
         "cuda": 0,
         "restore": null,
         "output_path": null,
@@ -128,7 +128,7 @@
         "skip_data_preprocessing": false,
         "skip_band_selection": true,
         "skip_data_postprocessing": true,
-        "model_id": "3d-cnn",
+        "model_id": "2d-cnn",
         "random_seed": 123,
         "epochs": 3,
         "batch_size": 32,

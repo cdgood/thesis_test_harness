@@ -7,9 +7,7 @@ for training and visualization.
 """
 
 ### Built-in Imports ###
-import argparse
 import gc
-from locale import normalize
 import os
 
 ### Other Library Imports ###
@@ -266,7 +264,35 @@ UH_2018_CLASS_MAP = {index: label for index, label in enumerate(UH_2018_CLASS_LI
 
 # Number of class labels for the University of Houston 2018 dataset
 # (one is subtracted to exclude the 'undefined' class)
+# UH_2018_NUM_CLASSES = len(UH_2018_CLASS_LIST) - len(UH_2018_IGNORED_CLASSES)
 UH_2018_NUM_CLASSES = len(UH_2018_CLASS_LIST)
+
+# The default resampling method to use when no method is indicated or
+# the method indicated is unsupported
+DEFAULT_RESAMPLING_METHOD = 'nearest'
+
+# Mapping of resampling method strings to their associated value
+#   - 'max', 'min', 'med', 'q1', 'q3' are only supported in GDAL >= 2.0.0.
+#   - 'nearest', 'bilinear', 'cubic', 'cubic_spline', 'lanczos', 'average', 
+#      'mode' are always available (GDAL >= 1.10).
+#   - 'sum' is only supported in GDAL >= 3.1.
+#   - 'rms' is only supported in GDAL >= 3.3.
+RESAMPLING_METHODS = {
+    'nearest': Resampling.nearest,
+    'bilinear': Resampling.bilinear,
+    'cubic': Resampling.cubic,
+    'cubic_spline': Resampling.cubic_spline,
+    'lanczos': Resampling.lanczos,
+    'average': Resampling.average,
+    'mode': Resampling.mode,
+    'gauss': Resampling.gauss,
+    'max': Resampling.max,
+    'min': Resampling.min,
+    'med': Resampling.med,
+    'q1': Resampling.q3,
+    'q3': Resampling.sum,
+    'rms': Resampling.rms
+}
 
 ### Classes ###
 
@@ -293,6 +319,7 @@ class UH_2018_Dataset:
         self.path_to_lidar_1550nm_intensity = UH_2018_LIDAR_INTENSITY_1550NM_PATH
         self.path_to_lidar_1064nm_intensity = UH_2018_LIDAR_INTENSITY_1064NM_PATH
         self.path_to_lidar_532nm_intensity = UH_2018_LIDAR_INTENSITY_532NM_PATH
+        self.paths_to_vhr_images = UH_2018_VHR_IMAGE_PATHS
 
         # Set dataset ground truth attributes
         self.gt_class_label_list = UH_2018_CLASS_LIST
@@ -760,7 +787,8 @@ class UH_2018_Dataset:
 
 
     def load_full_hs_image(self, gsd=UH_2018_GT_GSD,
-                           thres=True, normalize=True):
+                           thres=True, normalize=True,
+                           resampling=None):
         """
         Loads the full-size hyperspectral image for the University of
         Houston 2018 dataset sampled at the specified GSD.
@@ -770,6 +798,17 @@ class UH_2018_Dataset:
 
         # Check GSD parameter value
         if gsd <= 0: raise ValueError("'gsd' parameter must be greater than 0!")
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
 
         # Set the factor of GSD resampling
         resample_factor = self.gsd_hs / float(gsd)
@@ -788,20 +827,24 @@ class UH_2018_Dataset:
         # Open the training HSI Envi file as src
         with rasterio.open(image_path, format='ENVI') as src:
 
-            # Set the shape of the resampled image
-            out_shape=(src.count,
-                        int(src.height * resample_factor), 
-                        int(src.width * resample_factor))
-
             # Read the image, resample it to the appropriate GSD, 
             # arrange the numpy array to be (rows, cols, bands), 
             # and remove unused bands
-            self.hs_image = np.moveaxis(src.read(
-                        out_shape=out_shape, 
-                        resampling=Resampling.nearest), 0, -1)[:,:,:-2]
+            if resample_factor == 1.0:
+                self.hs_image = np.moveaxis(src.read(), 0, -1)[:,:,:-2]
+            else:
+                # Set the shape of the resampled image
+                out_shape=(src.count,
+                            int(src.height * resample_factor), 
+                            int(src.width * resample_factor))
+
+                self.hs_image = np.moveaxis(src.read(
+                            out_shape=out_shape, 
+                            resampling=resampling), 0, -1)[:,:,:-2]
             
             # Cast image array as float type for normalization
-            self.hs_image = self.hs_image.astype(float, copy=False)
+            if normalize:
+                self.hs_image = self.hs_image.astype(float, copy=False)
 
             # Threshold the image so that any value over the threshold
             # is set to the image minimum
@@ -819,7 +862,7 @@ class UH_2018_Dataset:
 
 
     def load_hs_image_tiles(self, gsd=UH_2018_GT_GSD, tile_list=None,
-                            thres=True, normalize=True):
+                            thres=True, normalize=True, resampling=None):
         """
         Loads the University of Houston 2018 dataset's hyperspectral
         images as a set of tiles sampled at a specified GSD. If no tile
@@ -838,6 +881,17 @@ class UH_2018_Dataset:
         # Initialize list for tiles
         self.hs_image_tiles = []
         
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
+
         # Set the factor of GSD resampling
         resample_factor = self.gsd_hs / float(gsd)
 
@@ -855,6 +909,11 @@ class UH_2018_Dataset:
             tile_width = src.width / self.dataset_tiled_subset_cols
             tile_height = src.height / self.dataset_tiled_subset_rows
 
+            # Set the shape of the resampled tile
+            out_shape=(src.count,
+                    int(tile_height * resample_factor), 
+                    int(tile_width * resample_factor))
+
             # Read in the image data for each image tile
             for tile_row in range(0, self.dataset_tiled_subset_rows):
                 for tile_column in range(0, self.dataset_tiled_subset_cols):
@@ -869,18 +928,16 @@ class UH_2018_Dataset:
                                     tile_height * tile_row, 
                                     tile_width, tile_height)
 
-                    # Set the shape of the resampled tile
-                    out_shape=(src.count,
-                            int(tile_height * resample_factor), 
-                            int(tile_width * resample_factor))
-
                     # Read the tile window from the image, resample it to
                     # the appropriate GSD, arrange the numpy array to be
                     # (rows, cols, bands), and remove unused bands
-                    tile = np.moveaxis(src.read(
-                        window = window, 
-                        out_shape=out_shape, 
-                        resampling=Resampling.nearest), 0, -1)[:,:,:-2]
+                    if resample_factor == 1.0:
+                        tile = np.moveaxis(src.read(window = window), 0, -1)[:,:,:-2]
+                    else:
+                        tile = np.moveaxis(src.read(
+                            window = window, 
+                            out_shape=out_shape, 
+                            resampling=resampling), 0, -1)[:,:,:-2]
                     
                     # Copy the tile to the tiles array
                     self.hs_image_tiles.append(np.copy(tile))
@@ -893,7 +950,8 @@ class UH_2018_Dataset:
             self.hs_image_tiles = np.stack(self.hs_image_tiles)
 
             # Cast image array as float type for normalization
-            self.hs_image_tiles = self.hs_image_tiles.astype(float, copy=False)
+            if normalize:
+                self.hs_image_tiles = self.hs_image_tiles.astype(float, copy=False)
 
             # Threshold the image tiles so that any value over the threshold
             # is set to the image minimum
@@ -1056,7 +1114,8 @@ class UH_2018_Dataset:
 
 
     def load_full_lidar_ms_image(self, gsd=UH_2018_GT_GSD,
-                                 thres=True, normalize=True):
+                                 thres=True, normalize=True,
+                                 resampling=None):
         """
         Loads the full-size lidar multispectral intensisty image for the 
         University of Houston 2018 dataset sampled at the specified GSD.
@@ -1066,6 +1125,17 @@ class UH_2018_Dataset:
 
         # Check GSD parameter value
         if gsd <= 0: raise ValueError("'gsd' parameter must be greater than 0!")
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
 
         # Set the factor of GSD resampling
         resample_factor = self.gsd_lidar / float(gsd)
@@ -1097,25 +1167,32 @@ class UH_2018_Dataset:
              rasterio.open(c2_image_path) as c2_src, \
              rasterio.open(c3_image_path) as c3_src:
 
-            # Set the shape of the resampled image
-            c1_out_shape=(c1_src.count,
-                        int(c1_src.height * resample_factor), 
-                        int(c1_src.width * resample_factor))
-            c2_out_shape=(c2_src.count,
-                        int(c2_src.height * resample_factor), 
-                        int(c2_src.width * resample_factor))
-            c3_out_shape=(c3_src.count,
-                        int(c3_src.height * resample_factor), 
-                        int(c3_src.width * resample_factor))
-
             # Read the image, resample it to the appropriate GSD, 
             # arrange the numpy array to be (rows, cols, bands)
-            c1 = np.moveaxis(c1_src.read(out_shape=c1_out_shape, 
-                              resampling=Resampling.nearest), 0, -1)
-            c2 = np.moveaxis(c2_src.read(out_shape=c2_out_shape, 
-                              resampling=Resampling.nearest), 0, -1)
-            c3 = np.moveaxis(c3_src.read(out_shape=c3_out_shape, 
-                              resampling=Resampling.nearest), 0, -1)
+            if resample_factor == 1.0:
+                c1 = np.moveaxis(c1_src.read(), 0, -1)
+                c2 = np.moveaxis(c2_src.read(), 0, -1)
+                c3 = np.moveaxis(c3_src.read(), 0, -1)
+            else:
+                # Set the shape of the resampled image
+                c1_out_shape=(c1_src.count,
+                            int(c1_src.height * resample_factor), 
+                            int(c1_src.width * resample_factor))
+                c2_out_shape=(c2_src.count,
+                            int(c2_src.height * resample_factor), 
+                            int(c2_src.width * resample_factor))
+                c3_out_shape=(c3_src.count,
+                            int(c3_src.height * resample_factor), 
+                            int(c3_src.width * resample_factor))
+
+                # Read the image, resample it to the appropriate GSD, 
+                # arrange the numpy array to be (rows, cols, bands)
+                c1 = np.moveaxis(c1_src.read(out_shape=c1_out_shape, 
+                                resampling=resampling), 0, -1)
+                c2 = np.moveaxis(c2_src.read(out_shape=c2_out_shape, 
+                                resampling=resampling), 0, -1)
+                c3 = np.moveaxis(c3_src.read(out_shape=c3_out_shape, 
+                                resampling=resampling), 0, -1)
             
             # Stack each intensity band into a single cube
             self.lidar_ms_image = np.dstack((c1, c2, c3))
@@ -1135,7 +1212,8 @@ class UH_2018_Dataset:
 
 
     def load_lidar_ms_image_tiles(self, gsd=UH_2018_GT_GSD, tile_list=None,
-                                  thres=True, normalize=True):
+                                  thres=True, normalize=True,
+                                  resampling=None):
         """
         Loads the University of Houston 2018 dataset's lidar
         multispectral intensity image as a set of tiles sampled at a 
@@ -1151,6 +1229,17 @@ class UH_2018_Dataset:
         # Check tile_list parameter value
         if tile_list and not isinstance(tile_list, tuple): raise ValueError(
             "'tile_list' parameter should be a tuple of tuples!")
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
 
         # Set the factor of GSD resampling
         resample_factor = self.gsd_lidar / float(gsd)
@@ -1190,6 +1279,17 @@ class UH_2018_Dataset:
             c3_tile_width = c1_src.width / self.dataset_tiled_subset_cols
             c3_tile_height = c1_src.height / self.dataset_tiled_subset_rows
 
+            # Set the shape of the resampled tile
+            c1_out_shape=(c1_src.count,
+                int(c1_src.height * resample_factor), 
+                int(c1_src.width * resample_factor))
+            c2_out_shape=(c2_src.count,
+                        int(c2_src.height * resample_factor), 
+                        int(c2_src.width * resample_factor))
+            c3_out_shape=(c3_src.count,
+                        int(c3_src.height * resample_factor), 
+                        int(c3_src.width * resample_factor))
+
             # Read in the image data for each image tile
             for tile_row in range(0, self.dataset_tiled_subset_rows):
                 for tile_column in range(0, self.dataset_tiled_subset_cols):
@@ -1210,32 +1310,26 @@ class UH_2018_Dataset:
                                     c3_tile_height * tile_row, 
                                     c3_tile_width, c3_tile_height)
 
-                    # Set the shape of the resampled tile
-                    c1_out_shape=(c1_src.count,
-                        int(c1_src.height * resample_factor), 
-                        int(c1_src.width * resample_factor))
-                    c2_out_shape=(c2_src.count,
-                                int(c2_src.height * resample_factor), 
-                                int(c2_src.width * resample_factor))
-                    c3_out_shape=(c3_src.count,
-                                int(c3_src.height * resample_factor), 
-                                int(c3_src.width * resample_factor))
-
                     # Read the tile window from the image, resample it to
                     # the appropriate GSD, arrange the numpy array to be
                     # (rows, cols, bands)
-                    c1_tile = np.moveaxis(c1_src.read(
-                                    window = c1_window, 
-                                    out_shape=c1_out_shape, 
-                                    resampling=Resampling.nearest), 0, -1)
-                    c2_tile = np.moveaxis(c2_src.read(
-                                    window = c2_window, 
-                                    out_shape=c2_out_shape, 
-                                    resampling=Resampling.nearest), 0, -1)
-                    c3_tile = np.moveaxis(c3_src.read(
-                                    window = c3_window, 
-                                    out_shape=c3_out_shape, 
-                                    resampling=Resampling.nearest), 0, -1)
+                    if resample_factor == 1.0:
+                        c1_tile = np.moveaxis(c1_src.read(window = c1_window), 0, -1)
+                        c2_tile = np.moveaxis(c2_src.read(window = c2_window), 0, -1)
+                        c3_tile = np.moveaxis(c3_src.read(window = c3_window), 0, -1)
+                    else:
+                        c1_tile = np.moveaxis(c1_src.read(
+                                        window = c1_window, 
+                                        out_shape=c1_out_shape, 
+                                        resampling=resampling), 0, -1)
+                        c2_tile = np.moveaxis(c2_src.read(
+                                        window = c2_window, 
+                                        out_shape=c2_out_shape, 
+                                        resampling=resampling), 0, -1)
+                        c3_tile = np.moveaxis(c3_src.read(
+                                        window = c3_window, 
+                                        out_shape=c3_out_shape, 
+                                        resampling=resampling), 0, -1)
                     
                     # Copy the tile to the tiles array
                     self.lidar_ms_image_tiles.append(np.dstack((c1_tile, 
@@ -1390,7 +1484,8 @@ class UH_2018_Dataset:
 
 
     def load_full_lidar_dsm_image(self, gsd=UH_2018_GT_GSD,
-                                  thres=True, normalize=True):
+                                  thres=True, normalize=True,
+                                  resampling=None):
         """
         Loads the full-size LiDAR digital surface model (DSM) image for 
         the University of Houston 2018 dataset sampled at the specified 
@@ -1401,6 +1496,17 @@ class UH_2018_Dataset:
 
         # Check GSD parameter value
         if gsd <= 0: raise ValueError("'gsd' parameter must be greater than 0!")
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
 
         # Set the factor of GSD resampling
         resample_factor = self.gsd_lidar / float(gsd)
@@ -1419,20 +1525,20 @@ class UH_2018_Dataset:
         # Open the LiDAR DSM file as src
         with rasterio.open(image_path) as src:
 
-            # Set the shape of the resampled image
-            out_shape=(src.count,
-                       int(src.height * resample_factor), 
-                       int(src.width * resample_factor))
+            # Read the image, resample it to the appropriate GSD, 
+            # arrange the numpy array to be (rows, cols, bands), 
+            # and remove unused bands
+            if resample_factor == 1.0:
+                self.lidar_dsm_image = np.moveaxis(src.read(), 0, -1)
+            else:
+                # Set the shape of the resampled image
+                out_shape=(src.count,
+                        int(src.height * resample_factor), 
+                        int(src.width * resample_factor))
 
-            # Read the image, resample it to the appropriate GSD, 
-            # arrange the numpy array to be (rows, cols, bands), 
-            # and remove unused bands
-            # Read the image, resample it to the appropriate GSD, 
-            # arrange the numpy array to be (rows, cols, bands), 
-            # and remove unused bands
-            self.lidar_dsm_image = np.moveaxis(src.read(
-                                               out_shape=out_shape, 
-                                               resampling=Resampling.nearest), 0, -1)
+                self.lidar_dsm_image = np.moveaxis(src.read(
+                                                out_shape=out_shape, 
+                                                resampling=resampling), 0, -1)
 
             # Threshold the image so that any value over the threshold
             # is set to the image minimum
@@ -1449,7 +1555,7 @@ class UH_2018_Dataset:
 
 
     def load_lidar_dsm_image_tiles(self, gsd=UH_2018_GT_GSD, tile_list=None,
-                                   thres=True, normalize=True):
+                                   thres=True, normalize=True, resampling=None):
         """
         Loads the University of Houston 2018 dataset's LiDAR digital
         surface model (DSM) image as a set of tiles sampled at a 
@@ -1465,6 +1571,18 @@ class UH_2018_Dataset:
         # Check tile_list parameter value
         if tile_list and not isinstance(tile_list, tuple): raise ValueError(
             "'tile_list' parameter should be a tuple of tuples!")
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
+
 
         # Set the factor of GSD resampling
         resample_factor = self.gsd_lidar / float(gsd)
@@ -1506,18 +1624,17 @@ class UH_2018_Dataset:
                                     tile_height * tile_row, 
                                     tile_width, tile_height)
 
-                    # Set the shape of the resampled tile
-                    out_shape=(src.count,
-                               int(src.height * resample_factor), 
-                               int(src.width * resample_factor))
 
                     # Read the tile window from the image, resample it to
                     # the appropriate GSD, arrange the numpy array to be
                     # (rows, cols, bands), and remove unused bands
-                    tile = np.moveaxis(src.read(
-                                       window = window, 
-                                       out_shape=out_shape, 
-                                       resampling=Resampling.nearest), 0, -1)
+                    if resample_factor == 1.0:
+                        tile = np.moveaxis(src.read(window = window), 0, -1)
+                    else:
+                        tile = np.moveaxis(src.read(
+                                        window = window, 
+                                        out_shape=out_shape, 
+                                        resampling=resampling), 0, -1)
                     
                     # Copy the tile to the tiles array
                     self.lidar_dsm_image_tiles.append(tile)
@@ -1670,7 +1787,8 @@ class UH_2018_Dataset:
     def load_full_lidar_dem_image(self, gsd=UH_2018_GT_GSD,
                                   use_void_filling_model = False,
                                   use_hybrid_model = True,
-                                  thres=True, normalize=True):
+                                  thres=True, normalize=True,
+                                  resampling=None):
         """
         Loads the full-size lidar digital elevation model (DEM) image 
         for the University of Houston 2018 dataset sampled at the 
@@ -1686,6 +1804,17 @@ class UH_2018_Dataset:
         else:
             dem_path = self.path_to_lidar_dem_3msr
             print('Loading full LiDAR bare-earth elevation DEM image...')
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
 
         # Check GSD parameter value
         if gsd <= 0: raise ValueError("'gsd' parameter must be greater than 0!")
@@ -1706,20 +1835,20 @@ class UH_2018_Dataset:
         # Open the LiDAR DSM file as src
         with rasterio.open(image_path) as src:
 
-            # Set the shape of the resampled image
-            out_shape=(src.count,
-                       int(src.height * resample_factor), 
-                       int(src.width * resample_factor))
+            # Read the image, resample it to the appropriate GSD, 
+            # arrange the numpy array to be (rows, cols, bands), 
+            # and remove unused bands
+            if resample_factor == 1.0:
+                self.lidar_dem_image = np.moveaxis(src.read(), 0, -1)
+            else:
+                # Set the shape of the resampled image
+                out_shape=(src.count,
+                        int(src.height * resample_factor), 
+                        int(src.width * resample_factor))
 
-            # Read the image, resample it to the appropriate GSD, 
-            # arrange the numpy array to be (rows, cols, bands), 
-            # and remove unused bands
-            # Read the image, resample it to the appropriate GSD, 
-            # arrange the numpy array to be (rows, cols, bands), 
-            # and remove unused bands
-            self.lidar_dem_image = np.moveaxis(src.read(
-                                               out_shape=out_shape, 
-                                               resampling=Resampling.nearest), 0, -1)
+                self.lidar_dem_image = np.moveaxis(src.read(
+                                                out_shape=out_shape, 
+                                                resampling=resampling), 0, -1)
 
             # Threshold the image so that any value over the threshold
             # is set to the image minimum
@@ -1738,7 +1867,8 @@ class UH_2018_Dataset:
     def load_lidar_dem_image_tiles(self, gsd=UH_2018_GT_GSD, tile_list=None,
                                    use_void_filling_model = False,
                                    use_hybrid_model = True,
-                                   thres=True, normalize=True):
+                                   thres=True, normalize=True,
+                                   resampling=None):
         """
         Loads the University of Houston 2018 dataset's lidar digital
         elevation model (DEM) image as a set of tiles sampled at a 
@@ -1763,6 +1893,18 @@ class UH_2018_Dataset:
         if tile_list and not isinstance(tile_list, tuple): raise ValueError(
             "'tile_list' parameter should be a tuple of tuples!")
 
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
+
+            
         # Set the factor of GSD resampling
         resample_factor = self.gsd_lidar / float(gsd)
 
@@ -1802,18 +1944,16 @@ class UH_2018_Dataset:
                                     tile_height * tile_row, 
                                     tile_width, tile_height)
 
-                    # Set the shape of the resampled tile
-                    out_shape=(src.count,
-                               int(src.height * resample_factor), 
-                               int(src.width * resample_factor))
-
                     # Read the tile window from the image, resample it to
                     # the appropriate GSD, arrange the numpy array to be
                     # (rows, cols, bands), and remove unused bands
-                    tile = np.moveaxis(src.read(
-                                       window = window, 
-                                       out_shape=out_shape, 
-                                       resampling=Resampling.nearest), 0, -1)
+                    if resample_factor == 1.0:
+                        tile = np.moveaxis(src.read(window = window), 0, -1)
+                    else:                    
+                        tile = np.moveaxis(src.read(
+                                        window = window, 
+                                        out_shape=out_shape, 
+                                        resampling=resampling), 0, -1)
                     
                     # Copy the tile to the tiles array
                     self.lidar_dem_image_tiles.append(tile)
@@ -1966,7 +2106,8 @@ class UH_2018_Dataset:
     def load_full_lidar_ndsm_image(self, gsd=UH_2018_GT_GSD,
                                    use_void_filling_model = False,
                                    use_hybrid_model = True,
-                                   thres=True, normalize=True):
+                                   thres=True, normalize=True,
+                                   resampling=None):
         """
         Loads the full-size LiDAR normalized digital surface model 
         (NDSM) image for the University of Houston 2018 dataset sampled 
@@ -1985,6 +2126,18 @@ class UH_2018_Dataset:
 
         # Check GSD parameter value
         if gsd <= 0: raise ValueError("'gsd' parameter must be greater than 0!")
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
+
 
         # Set the factor of GSD resampling
         resample_factor = self.gsd_lidar / float(gsd)
@@ -2008,23 +2161,27 @@ class UH_2018_Dataset:
         with rasterio.open(dsm_image_path) as dsm_src, \
              rasterio.open(dem_image_path) as dem_src:
 
-            # Set the shape of the resampled image
-            dsm_out_shape=(dsm_src.count,
-                           int(dsm_src.height * resample_factor), 
-                           int(dsm_src.width * resample_factor))
-            dem_out_shape=(dem_src.count,
-                           int(dem_src.height * resample_factor), 
-                           int(dem_src.width * resample_factor))
-
             # Read the images, resample it to the appropriate GSD, 
             # arrange the numpy array to be (rows, cols, bands), 
             # and remove unused bands
-            dsm_image = np.moveaxis(dsm_src.read(
-                                    out_shape=dsm_out_shape, 
-                                    resampling=Resampling.nearest), 0, -1)
-            dem_image = np.moveaxis(dem_src.read(
-                                    out_shape=dem_out_shape, 
-                                    resampling=Resampling.nearest), 0, -1)
+            if resample_factor == 1.0:
+                dsm_image = np.moveaxis(dsm_src.read(), 0, -1)
+                dem_image = np.moveaxis(dem_src.read(), 0, -1)
+            else:
+                # Set the shape of the resampled image
+                dsm_out_shape=(dsm_src.count,
+                            int(dsm_src.height * resample_factor), 
+                            int(dsm_src.width * resample_factor))
+                dem_out_shape=(dem_src.count,
+                            int(dem_src.height * resample_factor), 
+                            int(dem_src.width * resample_factor))
+
+                dsm_image = np.moveaxis(dsm_src.read(
+                                        out_shape=dsm_out_shape, 
+                                        resampling=resampling), 0, -1)
+                dem_image = np.moveaxis(dem_src.read(
+                                        out_shape=dem_out_shape, 
+                                        resampling=resampling), 0, -1)
 
             # Threshold the images so that any value over the threshold
             # is set to the image minimum
@@ -2047,7 +2204,8 @@ class UH_2018_Dataset:
     def load_lidar_ndsm_image_tiles(self, gsd=UH_2018_GT_GSD, tile_list=None,
                                     use_void_filling_model = False,
                                     use_hybrid_model = True,
-                                    thres=True, normalize=True):
+                                    thres=True, normalize=True,
+                                    resampling=None):
         """
         Loads the University of Houston 2018 dataset's LiDAR normalized 
         digital surface model (NDSM) image as a set of tiles sampled at 
@@ -2071,6 +2229,18 @@ class UH_2018_Dataset:
         # Check tile_list parameter value
         if tile_list and not isinstance(tile_list, tuple): raise ValueError(
             "'tile_list' parameter should be a tuple of tuples!")
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
+
 
         # Set the factor of GSD resampling
         resample_factor = self.gsd_lidar / float(gsd)
@@ -2126,26 +2296,26 @@ class UH_2018_Dataset:
                                        dem_tile_height * tile_row, 
                                        dem_tile_width, dem_tile_height)
 
-                    # Set the shapes of the resampled tiles
-                    dsm_out_shape=(dsm_src.count,
-                                   int(dsm_src.height * resample_factor), 
-                                   int(dsm_src.width * resample_factor))
-                    dem_out_shape=(dem_src.count,
-                                   int(dem_src.height * resample_factor), 
-                                   int(dem_src.width * resample_factor))
-
                     # Read the tile window from the image, resample it to
                     # the appropriate GSD, arrange the numpy array to be
                     # (rows, cols, bands), and remove unused bands
-                    dsm_tile = np.moveaxis(dsm_src.read(
-                                           window = dsm_window, 
-                                           out_shape=dsm_out_shape, 
-                                           resampling=Resampling.nearest), 0, -1)
-                    
-                    dem_tile = np.moveaxis(dem_src.read(
-                                           window = dem_window, 
-                                           out_shape=dem_out_shape, 
-                                           resampling=Resampling.nearest), 0, -1)
+                    if resample_factor == 1.0:
+                        dsm_tile = np.moveaxis(dsm_src.read(
+                                            window = dsm_window), 0, -1)
+                        
+                        dem_tile = np.moveaxis(dem_src.read(
+                                            window = dem_window), 0, -1)
+                    else:     
+                        dsm_tile = np.moveaxis(dsm_src.read(
+                                            window = dsm_window, 
+                                            out_shape=dsm_out_shape, 
+                                            resampling=resampling), 0, -1)
+                        
+                        dem_tile = np.moveaxis(dem_src.read(
+                                            window = dem_window, 
+                                            out_shape=dem_out_shape, 
+                                            resampling=resampling), 0, -1)
+
                     
                     # Threshold the image tiles so that any value over 
                     # the threshold is set to the image minimum
@@ -2298,7 +2468,7 @@ class UH_2018_Dataset:
         plt.show(block=True)
 
     def load_full_vhr_image(self, gsd=UH_2018_GT_GSD,
-                           thres=True, normalize=True):
+                           thres=True, normalize=True, resampling=None):
         """
         Loads the full-size VHR RGB image for the University of
         Houston 2018 dataset sampled at the specified GSD.
@@ -2309,20 +2479,93 @@ class UH_2018_Dataset:
         # images, so load tiles and then merge them to create full VHR
         # image
         self.vhr_image = self.merge_tiles(
-            self.load_vhr_image_tiles(gsd=gsd, thres=thres, normalize=normalize))
+            self.load_vhr_image_tiles(gsd=gsd, thres=thres, 
+                                      normalize=normalize, 
+                                      resampling=resampling))
 
-        return self.gt_image
+        return self.vhr_image
     
     def load_vhr_image_tiles(self, gsd=UH_2018_GT_GSD, tile_list=None,
-                             thres=True, normalize=True):
+                             thres=True, normalize=True, resampling=None):
         """
         Loads the University of Houston 2018 dataset's hyperspectral
         images as a set of tiles sampled at a specified GSD. If no tile
         list is given, the whole image will be loaded as tiles.
         """
 
-        #TODO
-        pass
+        print('Loading VHR RGB dataset tile images...')
+
+        # Check GSD parameter value
+        if gsd <= 0: raise ValueError("'gsd' parameter must be greater than 0!")
+
+        # Initialize list for tiles
+        self.vhr_image_tiles = []
+
+        if resampling is None:
+            print('No resampling method chosen, defaulting to '
+                    f'{DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+        elif resampling not in RESAMPLING_METHODS:
+            print(f'Incompatible resampling method {resampling}, '
+                    f'defaulting to {DEFAULT_RESAMPLING_METHOD}')
+            resampling = DEFAULT_RESAMPLING_METHOD
+            
+        resampling = RESAMPLING_METHODS[resampling]
+
+
+        # Set the factor of GSD resampling 1/factor for 1m to 0.5m
+        resample_factor = self.gsd_vhr / float(gsd)
+
+        for tile_row, tile_paths in enumerate(self.paths_to_vhr_images):
+            for tile_column, tile_path in enumerate(tile_paths):
+
+                # If specified tiles are desired, then skip any
+                # tiles that do not match the tile_list parameter
+                if tile_list and (tile_row, tile_column) not in tile_list:
+                    continue
+
+                image_path = os.path.join(self.path_to_dataset_directory, tile_path)
+
+                # Throw error if file path does not exist
+                if not os.path.isfile(image_path): raise FileNotFoundError(
+                    f'Path to UH2018 VHR RGB tile ({tile_row}, {tile_column})'
+                    f' image is invalid! Path={image_path}')
+                    
+
+                with rasterio.open(image_path) as src:
+
+                    # Read the tile image and resample it to
+                    # the appropriate GSD, arrange the numpy array to be
+                    # (rows, cols, bands)
+                    if resample_factor == 1.0:
+                            tile = np.moveaxis(src.read(), 0, -1)
+                    else:
+                        # Set the shape of the resampled tile
+                        out_shape=(src.count,
+                                int(src.height * resample_factor), 
+                                int(src.width * resample_factor))
+
+                        tile = np.moveaxis(src.read(
+                            out_shape=out_shape, 
+                            resampling=resampling), 0, -1)
+                    
+                    # Copy the tile to the tiles array
+                    self.vhr_image_tiles.append(np.copy(tile))
+        
+        # If no tiles were added to the tile list, then set image tiles
+        # variable to 'None'
+        if len(self.vhr_image_tiles) == 0: self.vhr_image_tiles = None
+        else:
+            # Turn list of numpy arrays into single numpy array
+            self.vhr_image_tiles = np.stack(self.vhr_image_tiles)
+            
+            # Normalize each intensity band between 0.0 and 1.0
+            if normalize:
+                self.vhr_image_tiles = self.vhr_image_tiles.astype(float, copy=False)
+                self.vhr_image_tiles -= self.vhr_image_tiles.min()
+                self.vhr_image_tiles /= self.vhr_image_tiles.max()
+
+        return self.vhr_image_tiles
 
 
 
@@ -2524,14 +2767,20 @@ if __name__ == "__main__":
     #                       train_gt_overlay=False,
     #                       test_gt_overlay=False)
 
-    dataset.visualize_hs_data_cube()
+    # dataset.visualize_hs_data_cube()
 
-    dataset.get_gt_class_statistics(print_results=True)
-    dataset.show_hs_image(rgb_channels=HS_RGB)
-    dataset.show_lidar_ms_image()
-    dataset.show_lidar_dsm_image()
-    dataset.show_lidar_dem_image()
-    dataset.show_lidar_ndsm_image()
+    # dataset.get_gt_class_statistics(print_results=True)
+    # dataset.show_hs_image(rgb_channels=HS_RGB)
+    # dataset.show_lidar_ms_image()
+    # dataset.show_lidar_dsm_image()
+    # dataset.show_lidar_dem_image()
+    # dataset.show_lidar_ndsm_image()
+    vhr_data = dataset.load_full_vhr_image(resampling='cubic_spline', normalize=False)
+    print(f'VHR dims: {vhr_data.ndim}')
+    print(f'VHR shape: {vhr_data.shape}')
+    print(f'VHR first element value: {vhr_data[0,0]}')
+
+    dataset.show_vhr_image()
 
     # hsi = dataset.load_full_hs_image(thres=False, normalize=False)
     # spectral.envi.save_image('2018_IEEE_GRSS_DFC_HSI_TR.hdr', hsi)

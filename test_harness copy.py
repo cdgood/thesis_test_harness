@@ -40,14 +40,13 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 from tensorflow.keras.callbacks import (
     EarlyStopping,
-    LearningRateScheduler,
     ModelCheckpoint,
 )
 
 ### Local Imports ###
 from datasets import (
     # preprocess_data,
-    get_valid_gt_indices,
+    sample_gt,
     create_datasets,
     load_grss_dfc_2018_uh_dataset,
     load_indian_pines_dataset,
@@ -64,7 +63,6 @@ from models import (
     cnn_2d_model,
     cnn_3d_model,
     baseline_cnn_model,
-    nin_model,
 )
 
 ### Environment ###
@@ -141,14 +139,12 @@ def prime_generator():
         q += 1
 
 def preprocess_data(data, **hyperparams):
-    """
-    """
+    
     #TODO
     return data
 
 def band_selection(data, classes, **hyperparams):
-    """
-    """
+    
     band_reduction_method = hyperparams['band_reduction_method']
     n_components = hyperparams['n_components']
 
@@ -223,31 +219,16 @@ def band_selection(data, classes, **hyperparams):
 
     return data
 
-def postprocess_data(pred_test, **hyperparams):
-    """
-    """
+def postprocess_data(data, **hyperparams):
+    
     #TODO
-    return pred_test
+    return data
 
-def filter_pred_results(test_gt, pred_test, ignored_labels):
-    """
-    """
-    # Reshape pred_test to be the same size as train_gt
-    pred_test = np.reshape(pred_test, test_gt.shape)
-    indices = get_valid_gt_indices(test_gt, ignored_labels=ignored_labels)
-    target_test = np.array([test_gt[x, y] for x, y in indices])
-    pred_test = np.array([pred_test[x, y] for x, y in indices])
+def run_model(model, train_dataset, val_dataset, test_dataset, target_test,
+              labels, iteration = None, **hyperparams):
 
-    return target_test, pred_test
-
-def run_model(model, train_dataset, val_dataset,
-              iteration = None, **hyperparams):
-    """
-    """
     # Initialize variables from the hyperparameters
     epochs = hyperparams['epochs']
-    epochs_before_decay = hyperparams['epochs_before_decay']
-    lr_decay_rate = hyperparams['lr_decay_rate']
     batch_size = hyperparams['batch_size']
     loss = hyperparams['loss']
     model_metrics = hyperparams['metrics']
@@ -261,10 +242,8 @@ def run_model(model, train_dataset, val_dataset,
             f'{model.name}_best_weights_experiment.hdf5')
     patience = hyperparams['patience']
     optimizer = get_optimizer(**hyperparams)
-
-    # Get train and val dataset info
-    # train_set, train_steps = train_dataset
-    # val_set, val_steps = val_dataset
+    ignored_labels = hyperparams['ignored_labels']
+    filtered_labels = [label for index, label in enumerate(labels) if index not in ignored_labels]
 
     # Create callback to stop training early if metrics don't improve
     cb_early_stopping = EarlyStopping(monitor='val_loss', 
@@ -280,19 +259,6 @@ def run_model(model, train_dataset, val_dataset,
                                          verbose=1, 
                                          save_best_only=False, 
                                          mode='auto')
-
-    # This function keeps the initial learning rate for a set number of epochs
-    # and reduces it at decay rate after that
-    def scheduler(epoch, lr):
-        if epoch < epochs_before_decay:
-            return lr
-        else:
-            print(f'Learning rate reduced from {lr} to {lr*lr_decay_rate}...')
-            return lr * lr_decay_rate
-            # return lr * tf.math.exp(-0.1)
-
-    # Create learning rate scheduler callback for learning rate decay
-    cb_lr_decay = LearningRateScheduler(scheduler)
 
     # Compile the model with the appropriate loss function, optimizer,
     # and metrics
@@ -314,18 +280,117 @@ def run_model(model, train_dataset, val_dataset,
     model_history = model.fit(
             train_dataset,
             validation_data=val_dataset,
+            # batch_size=batch_size,
             epochs=epochs, 
-            verbose=1,
             shuffle=True, 
-            callbacks=[cb_early_stopping, cb_save_best_model, cb_lr_decay]
+            # use_multiprocessing=True,
+            # workers=workers,
+            callbacks=[cb_early_stopping, cb_save_best_model]
         )
 
     # Record end time for model training
     model_train_end = time.process_time()
 
+    # Record start time for model evaluation
+    model_test_start = time.process_time()
+
+    # Evaluate the trained 3D-DenseNet
+    loss_and_metrics = model.evaluate(
+            test_dataset,
+            # batch_size=batch_size
+        )
+
+    # Record end time for model evaluation
+    model_test_end = time.process_time()
+
+    # Get prediction values for test dataset
+    pred_test = model.predict(test_dataset).argmax(axis=1)
+
     # Calculate training and testing times
     model_train_time = datetime.timedelta(seconds=(model_train_end - model_train_start))
+    model_test_time = datetime.timedelta(seconds=(model_test_end - model_test_start))
+
+    overall_acc = metrics.accuracy_score(target_test, pred_test)
+    precision = metrics.precision_score(target_test, pred_test, average='micro')
+    recall = metrics.recall_score(target_test, pred_test, average='micro')
+    kappa = metrics.cohen_kappa_score(target_test, pred_test)
+    confusion_matrix = metrics.confusion_matrix(target_test, pred_test)
+
+    # Calculate average accuracy and per-class accuracies
+    list_diag = np.diag(confusion_matrix)
+    list_raw_sum = np.sum(confusion_matrix, axis=1)
+    each_acc = np.nan_to_num(truediv(list_diag, list_raw_sum))
+    average_acc = np.mean(each_acc)
+
+
+    if np.unique(pred_test).shape[0] == len(filtered_labels):
+        labels = filtered_labels
+    else:
+        each_acc = np.insert(each_acc, ignored_labels, 0.0)
     
+    # Print results
+    print('---------------------------------------------------')
+    if iteration is None:
+        print('             MODEL EXPERIMENT RESULTS              ')
+    else:
+        print(f'          MODEL EXPERIMENT #{iteration} RESULTS              ')
+    print('---------------------------------------------------')
+    print(f'{model.name} train time: {model_train_time}')
+    print(f'{model.name} test time:  {model_test_time}')
+    print('...................................................')
+    print(f'{model.name} test score:     {loss_and_metrics[0]}')
+    print(f'{model.name} test accuracy:  {loss_and_metrics[1]}')
+    print('...................................................')
+    print(f'{model.name} overall accuracy:  {overall_acc}')
+    print(f'{model.name} average accuracy:  {average_acc}')
+    print(f'{model.name} precision score:   {precision}')
+    print(f'{model.name} recall score:      {recall}')
+    print(f'{model.name} cohen kappa score: {kappa}')
+    print('...................................................')
+    print(f'{model.name} Per-class accuracies:')
+    for i, label in enumerate(labels):
+        print(f'{label}: {each_acc[i]}')
+    print('---------------------------------------------------')
+    print()
+    # print(metrics.classification_report(target_test, pred_test, 
+    #                                 target_names=labels, digits=len(labels)))
+
+    # Save confusion matrix image
+    print('Creating confusion matrix plot...')
+    cm_filename = os.path.join(output_path,
+                f'experiment_{iteration+1}_{model.name}_confusion_matrix.png')
+    cm_sum = np.sum(confusion_matrix, axis=1, keepdims=True)
+    cm_perc = confusion_matrix / cm_sum.astype(float) * 100
+    annot = np.empty_like(confusion_matrix).astype(str)
+    nrows, ncols = confusion_matrix.shape
+    for i in range(nrows):
+        for j in range(ncols):
+            c = confusion_matrix[i, j]
+            p = cm_perc[i, j]
+            if i == j:
+                s = cm_sum[i]
+                annot[i, j] = '%.1f%%\n%d/%d' % (p, c, s)
+            elif c == 0:
+                annot[i, j] = ''
+            else:
+                annot[i, j] = '%.1f%%\n%d' % (p, c)
+    
+
+    cm = pd.DataFrame(confusion_matrix, index=labels, columns=labels)
+    cm.index.name = 'Actual'
+    cm.columns.name = 'Predicted'
+    fig, ax = plt.subplots(figsize=(25,25))
+    sns.heatmap(cm, annot=annot, fmt='', ax=ax)
+    plt.title(f'Experiment #{iteration+1} {model.name} Confusion Matrix')
+
+    print('Saving confusion matrix plot...')
+    plt.savefig(cm_filename)
+
+    # Clear plot data for next plot
+    plt.clf()
+
+    
+
     # Write model history to file
     with open(os.path.join(output_path,
          f'Experiment_{iteration+1}_training_history.txt'), 'w') as hf:
@@ -353,74 +418,14 @@ def run_model(model, train_dataset, val_dataset,
             for key in model_history.history.keys():
                 hf.write(f'  {key}: {model_history.history[key][epoch]}\n')
 
-    return model, model_train_time
-
-
-
-def test_model(model, test_dataset, **hyperparams):
-    """
-    """
-    
-    # test_set, test_steps = test_dataset
-    workers = hyperparams['workers']
-
-    print(f'Testing {model.name} with test dataset...')
-
-    # Record start time for model evaluation
-    model_test_start = time.process_time()
-
-    # Get prediction values for test dataset
-    # pred_test = model.predict(test_dataset,
-    #                           use_multiprocessing=True,
-    #                           workers=workers).argmax(axis=1)
-    pred_test = model.predict(test_dataset,
-                            #   steps=test_steps,
-                              verbose=1,
-                            #   use_multiprocessing=True,
-                            #   workers=workers
-                              ).argmax(axis=1)
-
-    # Record end time for model evaluation
-    model_test_end = time.process_time()
-
-    # Get time elapsed for testing model
-    model_test_time = datetime.timedelta(seconds=(model_test_end - model_test_start))
-
-    print('Testing completed!')
-   
-
-    return pred_test, model_test_time
-
-
-def calculate_model_statistics(pred_test, target_test, labels,
-                               **hyperparams):
-    """
-    """
-    labels = hyperparams['all_class_labels']
-
-    overall_acc = metrics.accuracy_score(target_test, pred_test)
-    precision = metrics.precision_score(target_test, pred_test, average='micro')
-    recall = metrics.recall_score(target_test, pred_test, average='micro')
-    kappa = metrics.cohen_kappa_score(target_test, pred_test)
-    confusion_matrix = metrics.confusion_matrix(target_test, pred_test, labels=range(len(labels)))
-
-    # Supress/hide invalid value warning
-    # np.seterr(invalid='ignore')
-
-    # Calculate average accuracy and per-class accuracies
-    list_diag = np.diag(confusion_matrix)
-    list_raw_sum = np.sum(confusion_matrix, axis=1)
-    each_acc = np.nan_to_num(truediv(list_diag, list_raw_sum))
-    average_acc = np.mean(each_acc)
-
-    # Get classification report
-    classification_report = metrics.classification_report(target_test, 
-                                                          pred_test, 
-                                                          labels=range(len(labels)),
-                                                          target_names=labels, 
-                                                          digits=3)
 
     results = {
+        'model_name': model.name,
+        'model': model,
+        'train_time': model_train_time,
+        'test_time': model_test_time,
+        'test_score': loss_and_metrics[0],
+        'test_accuracy': loss_and_metrics[1],
         'overall_accuracy': overall_acc,
         'average_accuracy': average_acc,
         'precision_score': precision,
@@ -429,26 +434,64 @@ def calculate_model_statistics(pred_test, target_test, labels,
         'confusion_matrix': confusion_matrix,
         'per_class_accuracies': each_acc,
         'labels': labels,
-        'classification_report': classification_report,
     }
 
     return results
 
-def create_confusion_matrix_plot(confusion_matrix, labels, model_name, iteration=None):
-    """
-    """
+def test_model(model, test_dataset, target_test, labels, 
+               iteration=None, **hyperparams):
+    pass
 
-    # Create filename for confusion matrix image file
-    if iteration is not None:
-        filename = f'experiment_{iteration+1}_{model_name}_confusion_matrix.png'
+def show_training_results(results, **hyperparams):
+    overall_acc = metrics.accuracy_score(target_test, pred_test)
+    precision = metrics.precision_score(target_test, pred_test, average='micro')
+    recall = metrics.recall_score(target_test, pred_test, average='micro')
+    kappa = metrics.cohen_kappa_score(target_test, pred_test)
+    confusion_matrix = metrics.confusion_matrix(target_test, pred_test)
+
+    # Calculate average accuracy and per-class accuracies
+    list_diag = np.diag(confusion_matrix)
+    list_raw_sum = np.sum(confusion_matrix, axis=1)
+    each_acc = np.nan_to_num(truediv(list_diag, list_raw_sum))
+    average_acc = np.mean(each_acc)
+
+
+    if np.unique(pred_test).shape[0] == len(filtered_labels):
+        labels = filtered_labels
     else:
-        filename = f'experiment_{model_name}_confusion_matrix.png'
+        each_acc = np.insert(each_acc, ignored_labels, 0.0)
+    
+    # Print results
+    print('---------------------------------------------------')
+    if iteration is None:
+        print('             MODEL EXPERIMENT RESULTS              ')
+    else:
+        print(f'          MODEL EXPERIMENT #{iteration} RESULTS              ')
+    print('---------------------------------------------------')
+    print(f'{model.name} train time: {model_train_time}')
+    print(f'{model.name} test time:  {model_test_time}')
+    print('...................................................')
+    print(f'{model.name} test score:     {loss_and_metrics[0]}')
+    print(f'{model.name} test accuracy:  {loss_and_metrics[1]}')
+    print('...................................................')
+    print(f'{model.name} overall accuracy:  {overall_acc}')
+    print(f'{model.name} average accuracy:  {average_acc}')
+    print(f'{model.name} precision score:   {precision}')
+    print(f'{model.name} recall score:      {recall}')
+    print(f'{model.name} cohen kappa score: {kappa}')
+    print('...................................................')
+    print(f'{model.name} Per-class accuracies:')
+    for i, label in enumerate(labels):
+        print(f'{label}: {each_acc[i]}')
+    print('---------------------------------------------------')
+    print()
+    # print(metrics.classification_report(target_test, pred_test, 
+    #                                 target_names=labels, digits=len(labels)))
 
-    # Create full file name for confusion matrix image file
-    cm_filename = os.path.join(output_path, filename)
-
-    # Create annotations for confusion matrix
-    print('Creating confusion matrix annotations...')
+    # Save confusion matrix image
+    print('Creating confusion matrix plot...')
+    cm_filename = os.path.join(output_path,
+                f'experiment_{iteration+1}_{model.name}_confusion_matrix.png')
     cm_sum = np.sum(confusion_matrix, axis=1, keepdims=True)
     cm_perc = confusion_matrix / cm_sum.astype(float) * 100
     annot = np.empty_like(confusion_matrix).astype(str)
@@ -466,71 +509,18 @@ def create_confusion_matrix_plot(confusion_matrix, labels, model_name, iteration
                 annot[i, j] = '%.1f%%\n%d' % (p, c)
     
 
-    # Create confusion matrix dataframe
-    print('Creating confusion matrix plot...')
     cm = pd.DataFrame(confusion_matrix, index=labels, columns=labels)
     cm.index.name = 'Actual'
     cm.columns.name = 'Predicted'
-    fig, ax = plt.subplots(figsize=(30,30))
+    fig, ax = plt.subplots(figsize=(25,25))
     sns.heatmap(cm, annot=annot, fmt='', ax=ax)
-
-    if iteration is not None:
-        plt.title(f'Experiment #{iteration+1} {model.name} Confusion Matrix')
-    else:
-        plt.title(f'Experiment w/ {model.name} Confusion Matrix')
+    plt.title(f'Experiment #{iteration+1} {model.name} Confusion Matrix')
 
     print('Saving confusion matrix plot...')
     plt.savefig(cm_filename)
 
     # Clear plot data for next plot
     plt.clf()
-
-def output_experiment_results(experiment_info):
-    """
-    """
-
-    # Get variables from dictionary
-    experiment_name = experiment_info['experiment_name']
-    model_name = experiment_info['model_name']
-    model_train_time = experiment_info['model_train_time']
-    model_test_time = experiment_info['model_test_time']
-    overall_acc = experiment_info['overall_accuracy']
-    average_acc = experiment_info['average_accuracy']
-    per_class_accuracies = experiment_info['per_class_accuracies']
-    precision = experiment_info['precision_score']
-    recall = experiment_info['recall_score']
-    kappa = experiment_info['cohen_kappa_score']
-    labels = experiment_info['labels']
-    classification_report = experiment_info['classification_report']
-    
-    # Print results
-    print('---------------------------------------------------')
-    if experiment_name is None:
-        print('             MODEL EXPERIMENT RESULTS              ')
-    else:
-        print(f'          "{experiment_name}" RESULTS              ')
-    print('---------------------------------------------------')
-    print(f' MODEL NAME: {model_name}')
-    print('---------------------------------------------------')
-    print(f'{model_name} train time: {model_train_time}')
-    print(f'{model_name} test time:  {model_test_time}')
-    print('...................................................')
-    print(f'{model_name} overall accuracy:  {overall_acc}')
-    print(f'{model_name} average accuracy:  {average_acc}')
-    print(f'{model_name} precision score:   {precision}')
-    print(f'{model_name} recall score:      {recall}')
-    print(f'{model_name} cohen kappa score: {kappa}')
-    print('...................................................')
-    print(f'{model_name} Per-class accuracies:')
-    for i, label in enumerate(labels):
-        print(f'{label}: {per_class_accuracies[i]}')
-    print('---------------------------------------------------')
-    print('              CLASSIFICATION REPORT                ')
-    print('...................................................')
-    print(classification_report)
-    print('---------------------------------------------------')
-    print()
-
 
 def test_harness_parser():
     """
@@ -966,7 +956,6 @@ if __name__ == "__main__":
 
         experiment_data = {
             'experiment_number': iteration + 1,
-            'experiment_name': None,
             'success': False,
             'random_seed': None,
             'dataset': None,
@@ -982,6 +971,8 @@ if __name__ == "__main__":
             'loss': None,
             'train_time': 0.0,
             'test_time': 0.0,
+            'test_score': 0.0,
+            'test_accuracy': 0.0,
             'overall_accuracy': 0.0,
             'average_accuracy': 0.0,
             'precision_score': 0.0,
@@ -991,16 +982,10 @@ if __name__ == "__main__":
 
         per_class_data = {
             'experiment_number': iteration + 1, 
-            'experiment_name': None,
             'random_seed': None,
             'model': None, 
-            'train_time': 0.0,
-            'test_time': 0.0,
             'overall_accuracy': 0.0, 
             'average_accuracy': 0.0,
-            'precision_score': 0.0,
-            'recall_score': 0.0,
-            'cohen_kappa_score': 0.0,
         }
 
         experiments_results_file = f'{outfile_prefix}_results.csv'
@@ -1021,14 +1006,10 @@ if __name__ == "__main__":
                 # value from the command line
                 hyperparams['workers'] = workers
 
-
-                experiment_name = experiments.index[iteration]
                 print('<~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~>')
                 print(f'EXPERIMENT NAME: {experiments.index[iteration]}')
                 print('<~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~>')
                 print()
-            else:
-                experiment_name = None
 
 
             # Print out parameters for experiment
@@ -1198,7 +1179,6 @@ if __name__ == "__main__":
                         'random_seed': seed,
                         'n_classes': num_classes,
                         'n_bands': img_channels,
-                        'all_class_labels': all_class_labels,
                         'ignored_labels': ignored_labels,
                         'device': device,
                         'supervision': supervision,
@@ -1213,7 +1193,6 @@ if __name__ == "__main__":
 
                 # Update experiment data
                 experiment_data.update({
-                    'experiment_name': experiment_name,
                     'random_seed': seed,
                     'dataset': dataset_name,
                     'channels': img_channels,
@@ -1240,14 +1219,7 @@ if __name__ == "__main__":
                     print('-------------------------------------------------------------------')
 
                     print('Breaking down image into data patches and splitting data into train, validation, and test sets...')
-                    train_dataset, val_dataset, test_dataset = create_datasets(data, train_gt, test_gt, **hyperparams)
-                    target_test = np.array(test_dataset.labels)
-                    # datasets = create_datasets_v2(data, train_gt, test_gt, **hyperparams)
-
-                    # train_dataset = (datasets['train_dataset'], datasets['train_steps'])
-                    # val_dataset = (datasets['val_dataset'], datasets['val_steps'])
-                    # test_dataset = (datasets['test_dataset'], datasets['test_steps'])
-                    # target_test = datasets['target_test']
+                    train_dataset, val_dataset, test_dataset, target_test = create_datasets(data, train_gt, test_gt, **hyperparams)
 
                     print('-------------------------------------------------------------------')
                     print()
@@ -1282,18 +1254,12 @@ if __name__ == "__main__":
                                     nb_classes=num_classes)
                 elif hyperparams['model_id'] == 'cnn-baseline':
                     filter_size = patch_size // 2 + 1
-                    num_filters = img_channels * 2
                     model = baseline_cnn_model(img_rows=img_rows, 
                                             img_cols=img_cols, 
                                             img_channels=img_channels, 
                                             patch_size=filter_size, 
-                                            nb_filters=num_filters, 
+                                            nb_filters=num_classes * 2, 
                                             nb_classes=num_classes)
-                elif hyperparams['model_id'] == 'nin':
-                    model = nin_model(img_rows=img_rows, 
-                                    img_cols=img_cols, 
-                                    img_channels=img_channels, 
-                                    num_classes=num_classes)              
                 elif hyperparams['model_id'] == 'fusion-fcn':
                     branch_1_shape = (img_rows, img_cols, 
                                 len(lidar_ms_channels) + len(vhr_rgb_channels))
@@ -1331,92 +1297,52 @@ if __name__ == "__main__":
                 print()
                 
                 print('-------------------------------------------------------------------')
-                print('TRAIN MODEL')
+                print('RUN MODEL')
                 print('-------------------------------------------------------------------')
 
                 # Run experiment on model
-                model, model_train_time = run_model(model=model, 
-                                                    train_dataset=train_dataset, 
-                                                    val_dataset=val_dataset,  
-                                                    iteration=iteration,
-                                                    **hyperparams)
-
-                print('-------------------------------------------------------------------')
-                print('TEST MODEL')
-                print('-------------------------------------------------------------------')
-
-                pred_test, model_test_time = test_model(model=model,
-                                                        test_dataset=test_dataset,
-                                                        **hyperparams)
-
-                if not hyperparams['skip_data_postprocessing']:
-                    print('-------------------------------------------------------------------')
-                    print('POSTPROCESS THE TEST RESULTS')
-                    print('-------------------------------------------------------------------')
-
-                    # Check whether pred_test is the right size
-                    print(f'pred_test shape: {pred_test.shape}')
-                    print(f'pred_test size:  {pred_test.size}')
-                    print(f'test_gt size:    {test_gt.size}')
-                    if pred_test.size != test_gt.size:
-                        print('Error! pred_test and test_gt do not have same number of elements!')
-                        print(f'       pred_test delta: {pred_test.size - test_gt.size} more elements')
-                    
-                    # Reshape pred_test to original gt image size so that
-                    # postprocessing can occur
-                    pred_test = np.reshape(pred_test, test_gt.shape)
-                    print(f'reshaped pred_test shape: {pred_test.shape}')
-                    print(f'test_gt shape:            {test_gt.shape}')
-
-                    pred_test = postprocess_data(pred_test, **hyperparams)
-                    print('-------------------------------------------------------------------')
-                    print()
+                results = run_model(model=model, 
+                                    train_dataset=train_dataset, 
+                                    val_dataset=val_dataset, 
+                                    test_dataset=test_dataset,
+                                    target_test=target_test, 
+                                    labels=all_class_labels, 
+                                    iteration=iteration,
+                                    **hyperparams)
                 
-                    # Remove ignored labels from target and predicted data
-                    target_test, pred_test = filter_pred_results(test_gt, pred_test, ignored_labels)
-                    
-                    
-
-                # Calculate the model performance statistics
-                experiment_results = calculate_model_statistics(pred_test, target_test, all_class_labels, **hyperparams)
-                experiment_results.update({
-                    'experiment_name': experiment_name,
-                    'model_name': model.name,
-                    'model_train_time': model_train_time,
-                    'model_test_time': model_test_time,
-                })
-
                 # Copy results to output data
-                experiment_data['train_time'] = experiment_results['model_train_time']
-                experiment_data['test_time'] = experiment_results['model_test_time']
-                experiment_data['overall_accuracy'] = experiment_results['overall_accuracy']
-                experiment_data['average_accuracy'] = experiment_results['average_accuracy']
-                experiment_data['precision_score'] = experiment_results['precision_score']
-                experiment_data['recall_score'] = experiment_results['recall_score']
-                experiment_data['cohen_kappa_score'] = experiment_results['cohen_kappa_score']
+                experiment_data['train_time'] = results['train_time']
+                experiment_data['test_time'] = results['test_time']
+                experiment_data['test_score'] = results['test_score']
+                experiment_data['test_accuracy'] = results['test_accuracy']
+                experiment_data['overall_accuracy'] = results['overall_accuracy']
+                experiment_data['average_accuracy'] = results['average_accuracy']
+                experiment_data['precision_score'] = results['precision_score']
+                experiment_data['recall_score'] = results['recall_score']
+                experiment_data['cohen_kappa_score'] = results['cohen_kappa_score']
 
-                per_class_data['train_time'] = model_train_time
-                per_class_data['test_time'] = model_test_time
-                per_class_data['overall_accuracy'] = experiment_results['overall_accuracy']
-                per_class_data['average_accuracy'] = experiment_results['average_accuracy']
-                per_class_data['precision_score'] = experiment_results['precision_score']
-                per_class_data['recall_score'] = experiment_results['recall_score']
-                per_class_data['cohen_kappa_score'] = experiment_results['cohen_kappa_score']
+                per_class_data['overall_accuracy'] = results['overall_accuracy']
+                per_class_data['average_accuracy'] = results['average_accuracy']
 
-                for index, acc in enumerate(experiment_results['per_class_accuracies']):
-                    per_class_data[experiment_results['labels'][index]] = acc
+                # per_class_accuracies = results['per_class_accuracies']
+                # if len(per_class_accuracies) != all_class_labels:
+                #     for index in ignored_labels:
+                #         np.insert(per_class_accuracies, index, 0.0)
 
-                # Output experimental results
-                output_experiment_results(experiment_results)
-
-                # Save image of confusion matrix
-                create_confusion_matrix_plot(experiment_results['confusion_matrix'], 
-                                             all_class_labels, 
-                                             model.name, 
-                                             iteration=iteration)
+                for index, acc in enumerate(results['per_class_accuracies']):
+                    per_class_data[results['labels'][index]] = acc
 
                 print('-------------------------------------------------------------------')
                 print()
+
+
+                if not hyperparams['skip_data_postprocessing']:
+                    print('-------------------------------------------------------------------')
+                    print('PREPROCESS THE DATA')
+                    print('-------------------------------------------------------------------')
+                    # data = postprocess_data(data, **hyperparams)
+                    print('-------------------------------------------------------------------')
+                    print()
 
                 experiment_data['success'] = True
 
