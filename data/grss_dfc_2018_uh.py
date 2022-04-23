@@ -101,13 +101,6 @@ UH_2018_HS_GSD = 1.0    # Hyperspectral image GSD in meters
 UH_2018_LIDAR_GSD = 0.5 # LiDAR raster image GSD in meters
 UH_2018_GT_GSD = 0.5    # Ground truth images GSD in meters
 
-# A list of the wavelength values for each lidar band channel
-UH_2018_LIDAR_BAND_WAVELENGTHS = [
-    '1550nm',
-    '1064nm',
-    '532nm'
-]
-
 # Number of hyperspectral band channels
 UH_2018_NUM_HS_BANDS = 48
 
@@ -178,7 +171,7 @@ UH_2018_HS_BAND_WAVELENGTHS = [
 
 # A list of hexidecimal color values corresponding to the wavelength of
 # the hyperspectral bands
-UH_2018_BAND_RGB = [
+UH_2018_HS_BAND_RGB = [
     '#610061',  #374nm
     '#780088',  #389nm
     '#8300c0',  #403nm
@@ -227,6 +220,30 @@ UH_2018_BAND_RGB = [
     '#370000',  #1018nm (representation)
     '#350000',  #1033nm (representation)
     '#320000',  #1047nm (representation)
+]
+
+UH_2018_LIDAR_MS_BAND_WAVELENGTHS = [
+    '1550nm',
+    '1064nm',
+    '532nm',
+]
+
+UH_2018_LIDAR_MS_BAND_RGB = [
+    '#150000',  #1550nm (representation)
+    '#2f0000',  #1064nm (representation)
+    '#65ff00',  #532nm
+]
+
+UH_2018_VHR_CHANNELS = [
+    'Red',
+    'Green',
+    'Blue',
+]
+
+UH_2018_VHR_RGB = [
+    '#ff0000',  #Red
+    '#00ff00',  #Green
+    '#0000ff',  #Blue
 ]
 
 UH_2018_IGNORED_CLASSES = [0]
@@ -329,17 +346,20 @@ class UH_2018_Dataset:
 
         # Set dataset hyperspectral image attributes
         self.hs_num_bands = UH_2018_NUM_HS_BANDS
-        self.hs_band_rgb_list = UH_2018_BAND_RGB
+        self.hs_band_rgb_list = UH_2018_HS_BAND_RGB
         self.hs_band_wavelength_labels = UH_2018_HS_BAND_WAVELENGTHS
         self.hs_band_val_thres = UH_2018_HS_BAND_THRES
 
         # Set dataset lidar data attributes
         self.lidar_ms_num_bands = UH_2018_NUM_LIDAR_BANDS
+        self.lidar_ms_band_wavelength_labels = UH_2018_LIDAR_MS_BAND_WAVELENGTHS
+        self.lidar_ms_band_rgb_list = UH_2018_LIDAR_MS_BAND_RGB
         self.lidar_ms_intensity_thres = UH_2018_MS_INTENSITY_THRESHOLD
         self.lidar_dsm_thres = UH_2018_DSM_THRESHOLD
 
         # Set dataset VHR RGB image attributes
-        #TODO
+        self.vhr_channel_labels = UH_2018_VHR_CHANNELS
+        self.vhr_channel_rgb_list = UH_2018_VHR_RGB
 
         # Set miscellaneous dataset attributes
         self.gsd_gt = UH_2018_GT_GSD
