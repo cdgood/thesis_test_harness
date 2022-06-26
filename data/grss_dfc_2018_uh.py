@@ -19,7 +19,6 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.windows import Window
 import spectral
-import wx
 
 
 ### Local Imports ###
@@ -1117,6 +1116,8 @@ class UH_2018_Dataset:
         Creates 3-D visualization of the hyperspectral data cube for
         the hyperspectral image.
         """
+
+        import wx
 
         # If the hs image member variable is empty, then load the full
         # hyperspectral image

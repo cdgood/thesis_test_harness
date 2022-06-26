@@ -359,10 +359,11 @@ def get_sns_box_plots(dataframes, output_path='./', show_figures=True):
 
         if not os.path.exists(file_path) or show_figures:
             sns.boxplot(data=df)
-            plt.xlabel('Intensity Values')
+            plt.xlabel('Channels')
             plt.xticks(rotation=90)
-            plt.ylabel('Channels')
+            plt.ylabel('Intensity Values')
             plt.title(f'{label} Channel Intensities Distribution')
+            plt.tight_layout()
 
             # Create figure and save image
             print(f'Saving "{label}" box plot to "{file_name}"...')
@@ -394,6 +395,7 @@ def get_sns_violin_plots(dataframes, output_path='./', show_figures=True):
             plt.xticks(rotation=90)
             plt.ylabel('Channels')
             plt.title(f'{label} Channel Intensities Distribution')
+            plt.tight_layout()
 
             # Create figure and save image
             print(f'Saving "{label}" violin plot to "{file_name}"...')
@@ -406,6 +408,155 @@ def get_sns_violin_plots(dataframes, output_path='./', show_figures=True):
             # Clear figure for next iteration
             plt.clf()
             plt.close()
+
+def create_class_average_profiles(dataset, output_path='./'):
+    """
+    """
+
+    # Load data
+    dataset.load_full_gt_image(train_only=True)
+    dataset.load_full_hs_image(thres=False, 
+                               normalize=False, 
+                               resampling='average',   # Also need to try 'nearest'
+                              )
+    dataset.load_full_lidar_ms_image(thres=False, 
+                                     normalize=False, 
+                                     resampling=None,
+                                    )
+    dataset.load_full_lidar_dsm_image(thres=False,
+                                      normalize=False,
+                                      resampling=None,
+                                    )
+    dataset.load_full_lidar_dem_image(thres=False,
+                                      normalize=False,
+                                      resampling=None,
+                                     )
+    dataset.load_full_vhr_image(thres=False,
+                                normalize=False,
+                                resampling='cubic_spline',
+                               )
+
+    # Set common variables
+    num_samples_per_class = np.zeros(dataset.gt_num_classes)
+    labeled_pixels = []
+    pixel_class_list = [[] for i in range(dataset.gt_num_classes)]
+    hs_avg_class_intensity = np.zeros((dataset.gt_num_classes, dataset.hs_num_bands))
+    lidar_ms_avg_class_intensity = np.zeros((dataset.gt_num_classes, dataset.lidar_ms_num_bands))
+    vhr_rgb_avg_class_intensity = np.zeros((dataset.gt_num_classes, 3))
+
+    rows, columns = dataset.gt_image.shape[0:2]
+
+    for r in range(rows):
+        for c in range(columns):
+
+            label = dataset.gt_image[r,c]
+            pixel = (r, c)
+
+            # Verify that pixel has a defined class label before adding
+            # it to labeled pixel list
+            if label not in dataset.gt_ignored_labels:
+                labeled_pixels.append(pixel)
+            
+            pixel_class_list[label].append(pixel)
+
+    for label, pixel_list in enumerate(pixel_class_list):
+        if label not in dataset.gt_ignored_labels:
+            # Count samples per class
+            num_samples_per_class[label] = len(pixel_list)
+
+            # Add up the intensities for each pixel of current class label
+            for r, c in pixel_list:
+                hs_avg_class_intensity[label] += dataset.hs_image[r, c]
+                lidar_ms_avg_class_intensity += dataset.lidar_ms_image[r, c]
+                vhr_rgb_avg_class_intensity += dataset.vhr_image[r, c]
+            
+            # Divide each intensity sum by the number of samples per
+            # current class label to get average intensity for this
+            # class
+            hs_avg_class_intensity[label] /= num_samples_per_class[label]
+            lidar_ms_avg_class_intensity /= num_samples_per_class[label]
+            vhr_rgb_avg_class_intensity /= num_samples_per_class[label]
+
+            # Create HS average profiles
+            # Set up average wavelength bar graph plot
+            hs_band_indices = [x for x in range(dataset.hs_num_bands)]
+            plt.figure(figsize=(12,9))
+            plt.bar(hs_band_indices, 
+                    hs_avg_class_intensity[label], 
+                    color=dataset.hs_band_rgb_list)
+            plt.grid(color='grey', linestyle='-', linewidth=1, axis='y')
+            plt.xticks(hs_band_indices, 
+                       dataset.hs_band_wavelength_labels, 
+                       rotation='vertical')
+            plt.xlabel('Wavelength')
+            plt.ylim(0, 8000)
+            plt.ylabel('Intensity')
+            plt.title(f'Average HS wavelength for {dataset.gt_class_label_list[label]}')
+            plt.tight_layout()
+
+            file_path = os.path.join(output_path, 
+                f'hs/hs_{dataset.gt_class_label_list[label].replace(" ", "_")}__average_intensity_profile.png')
+
+            # Create figure and save image
+            print(f'Saving HS "{dataset.gt_class_label_list[label]}" average intensity profile to "{file_path}"...')
+            plt.savefig(file_path)
+            plt.clf()
+            plt.close()
+            
+
+            # Create LiDAR MS average profiles
+            # Set up average wavelength bar graph plot
+            lidar_ms_band_indices = [x for x in range(dataset.lidar_ms_num_bands)]
+            plt.figure(figsize=(12,9))
+            plt.bar(lidar_ms_band_indices, 
+                    lidar_ms_avg_class_intensity[label], 
+                    color=dataset.lidar_ms_band_rgb_list)
+            plt.grid(color='grey', linestyle='-', linewidth=1, axis='y')
+            plt.xticks(lidar_ms_band_indices, 
+                       dataset.lidar_ms_band_wavelength_labels, 
+                       rotation='vertical')
+            plt.xlabel('Wavelength')
+            plt.ylim(0, 8000)
+            plt.ylabel('Intensity')
+            plt.title(f'Average LiDAR MS wavelength for {dataset.gt_class_label_list[label]}')
+            plt.tight_layout()
+
+            file_path = os.path.join(output_path, 
+                f'lidar-ms/lidar-ms_{dataset.gt_class_label_list[label].replace(" ", "_")}__average_intensity_profile.png')
+
+            # Create figure and save image
+            print(f'Saving LiDAR MS "{dataset.gt_class_label_list[label]}" average intensity profile to "{file_path}"...')
+            plt.savefig(file_path)
+            plt.clf()
+            plt.close()
+
+            # Create VHR RGB average profiles
+            # Set up average wavelength bar graph plot
+            vhr_rgb_indices = [0, 1, 2]
+            plt.figure(figsize=(12,9))
+            plt.bar(vhr_rgb_indices, 
+                    vhr_rgb_avg_class_intensity[label], 
+                    color=dataset.vhr_channel_rgb_list)
+            plt.grid(color='grey', linestyle='-', linewidth=1, axis='y')
+            plt.xticks(vhr_rgb_indices, 
+                       dataset.vhr_channel_labels, 
+                       rotation='vertical')
+            plt.xlabel('Wavelength')
+            plt.ylim(0, 255)
+            plt.ylabel('Intensity')
+            plt.title(f'Average RGB intensity for {dataset.gt_class_label_list[label]}')
+            plt.tight_layout()
+
+            file_path = os.path.join(output_path, 
+                f'vhr-rgb/vhr-rgb_{dataset.gt_class_label_list[label].replace(" ", "_")}__average_intensity_profile.png')
+
+            # Create figure and save image
+            print(f'Saving VHR RGB "{dataset.gt_class_label_list[label]}" average intensity profile to "{file_path}"...')
+            plt.savefig(file_path)
+            plt.clf()
+            plt.close()
+
+            
 
 def create_data_df(data, channel_labels):
     """
@@ -549,6 +700,10 @@ def get_list_of_analysis_subdirectories(dataset_name=None, class_labels=[]):
     if len(class_labels) == 0:
         subdirectories = [
             'box_plots',
+            'class_average_profiles',
+            'class_average_profiles/hs',
+            'class_average_profiles/lidar-ms',
+            'class_average_profiles/vhr-rgb',
             'dataset_csvs',
             'descriptions',
             'violin_plots',
@@ -559,6 +714,10 @@ def get_list_of_analysis_subdirectories(dataset_name=None, class_labels=[]):
     else:
         subdirectories = [
             'box_plots',
+            'class_average_profiles',
+            'class_average_profiles/hs',
+            'class_average_profiles/lidar-ms',
+            'class_average_profiles/vhr-rgb',
             'dataset_csvs',
             'descriptions',
             'violin_plots',
@@ -656,6 +815,8 @@ if __name__ == "__main__":
 
     data, gt = load_hs_data()
 
+    create_class_average_profiles(dataset, output_path = './analysis/grss_dfc_2018/class_average_profiles')
+
     sample_pixels = get_sample_pixels(data, gt, ignored_labels, 10)
     save_sample_pixel_profiles(sample_pixels, 
                                class_labels,
@@ -676,6 +837,6 @@ if __name__ == "__main__":
                       output_path='./analysis/grss_dfc_2018/box_plots/', 
                       show_figures=show_figures)
 
-    create_hs_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')
-    create_lidar_ms_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')
-    create_vhr_rgb_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')
+    # create_hs_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')
+    # create_lidar_ms_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')
+    # create_vhr_rgb_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')

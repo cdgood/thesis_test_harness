@@ -20,6 +20,7 @@ Usage: test_harness.py
 
 ### Built-in Imports ###
 import datetime
+import gc
 import os
 from pathlib import Path
 import time
@@ -62,6 +63,13 @@ from models.models import (
     baseline_cnn_model,
     nin_model,
 )
+from models.densenet_3d_fusion_model import (
+    densenet_3d_fusion_model,
+    densenet_3d_fusion_model2,
+    densenet_3d_fusion_model3,
+    # densenet_3d_fusion_model4,
+)
+from models.densenet_3d_modified import densenet_3d_modified_model
 from test_harness.training import (
     train_model,
 )
@@ -73,19 +81,23 @@ from test_harness.utils import (
     postprocess_data,
 )
 
-
 def run_test_harness(**hyperparams):
     """
     """
+
+    experiment_name = hyperparams['experiment_name']
+
+    # Get output path
+    if hyperparams['experiment_number'] < 1:
+        experiment_number = 1
+    else:
+        experiment_number = hyperparams['experiment_number']
 
     # Get output path
     if hyperparams['output_path'] is not None:
         output_path = hyperparams['output_path']
     else:
         output_path = './'
-    
-    # Get number of worker processes
-    workers = hyperparams['workers']
 
     # Get hyperparam derived variable values
     if hyperparams['experiments_json'] is not None:
@@ -101,7 +113,10 @@ def run_test_harness(**hyperparams):
     else:
         experiments = None
         iterations = hyperparams['iterations']
-        outfile_prefix = 'experiment'
+        if hyperparams['experiment_name'] is None:
+            outfile_prefix = 'experiment'
+        else:
+            outfile_prefix = hyperparams['experiment_name']
 
     # Get model name of CPU
     cpu_name = cpuinfo.get_cpu_info()['brand_raw']
@@ -114,6 +129,7 @@ def run_test_harness(**hyperparams):
     # Initialize data list variables for CSV output at end of program
     experiment_data_list = []
     per_class_data_lists = {}
+    per_class_selected_band_lists = {}
 
     print('-------------------------------------------------------------------')
     print('-------------------------------------------------------------------')
@@ -141,9 +157,16 @@ def run_test_harness(**hyperparams):
     val_dataset = None
     test_dataset = None
     target_test = None
+    band_selection_time = None
+    bands_selected = None
 
     # Go through experiment iterations
-    for iteration in range(iterations):
+    for iteration in range(experiment_number - 1, experiment_number - 1 + iterations):
+
+        # Clean memory in each iteration (otherwise the machine may
+        # randomly run out of memory if it is being pushed to its
+        # limit)
+        gc.collect()
 
         print('*******************************************************')
         print(f'<<< EXPERIMENT #{iteration+1}  STARTING >>>')
@@ -152,10 +175,13 @@ def run_test_harness(**hyperparams):
 
         experiment_data = {
             'experiment_number': iteration + 1,
-            'experiment_name': None,
+            'experiment_name': experiment_name,
             'success': False,
             'random_seed': None,
             'dataset': None,
+            'band_reduction_method': None,
+            'band_selection_time': None,
+            'bands_selected': None,
             'channels': None,
             'model': None,
             'device': None,
@@ -177,8 +203,11 @@ def run_test_harness(**hyperparams):
 
         per_class_data = {
             'experiment_number': iteration + 1, 
-            'experiment_name': None,
+            'experiment_name': experiment_name,
             'random_seed': None,
+            'band_reduction_method': None,
+            'band_selection_time': None,
+            'bands_selected': None,
             'model': None, 
             'train_time': 0.0,
             'test_time': 0.0,
@@ -189,38 +218,69 @@ def run_test_harness(**hyperparams):
             'cohen_kappa_score': 0.0,
         }
 
+        per_class_selected_bands = None
+
         experiments_results_file = f'{outfile_prefix}_results.csv'
         class_results_file = f'{outfile_prefix}__{dataset_choice}__class_results.csv'
+        selected_bands_file = f'{outfile_prefix}__{dataset_choice}__selected_bands.csv'
 
         # Experiment has begun, so make sure to catch any failures that
         # may occur
         try:
+            
             # If loading experiments from a file, get new set of hyperparams
             if experiments is not None:
                 # Get hyperparameters from dictionary
                 hyperparams = experiments.iloc[iteration].to_dict()
+
+                experiment_name = experiments.index[iteration]
+
+                hyperparams['experiment_name'] = experiment_name
+                experiment_data['experiment_name'] = experiment_name
+                per_class_data['experiment_name'] = experiment_name
 
                 # Fill in any missing parameters with None
                 for param in PARAMETER_LIST:
                     if param not in hyperparams:
                         hyperparams[param] = None
 
+                if hyperparams['experiment_number'] > 0:
+                    iteration = hyperparams['experiment_number'] - 1
+                    experiment_data['experiment_number'] = hyperparams['experiment_number']
+                    per_class_data['experiment_number'] = hyperparams['experiment_number']
+
                 # Ignore the output path in the experiments, use the path
                 # from command line arguments
                 hyperparams['output_path'] = output_path
 
-                # Ignore the workers argument in experiments, use the
-                # value from the command line
-                hyperparams['workers'] = workers
-
-
-                experiment_name = experiments.index[iteration]
+                
                 print('<~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~>')
                 print(f'EXPERIMENT NAME: {experiments.index[iteration]}')
                 print('<~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~>')
                 print()
             else:
-                experiment_name = None
+                # Fill in any missing parameters with None
+                for param in PARAMETER_LIST:
+                    if param not in hyperparams:
+                        hyperparams[param] = None
+                
+                experiment_name = hyperparams['experiment_name']
+            
+            # Save hyperparameters to experiment file if argument
+            # has been given
+            if hyperparams['save_experiment_path'] is not None:
+                extension = Path(hyperparams['save_experiment_path']).suffix
+                if extension == '.json':
+                    experiments_params_df = pd.DataFrame.from_dict({experiment_name:hyperparams,}, orient='index')
+                    experiments_params_df.to_json(hyperparams['save_experiment_path'], orient='index', indent=4)
+                elif extension == '.csv':
+                    # experiments_params_df = pd.DataFrame.from_dict(hyperparams)
+                    experiments_params_df = pd.DataFrame.from_dict({experiment_name:hyperparams,}, orient='index')
+                    # experiments_params_df.to_csv(hyperparams['save_experiment_path'])
+                    experiments_params_df.to_csv(hyperparams['save_experiment_path'])
+                else:
+                    #TODO
+                    pass
 
 
             # Print out parameters for experiment
@@ -245,6 +305,10 @@ def run_test_harness(**hyperparams):
             elif (hyperparams['model_id'] == 'fusion-fcn-v2' 
                 and hyperparams['dataset'] != 'grss_dfc_2018'):
                 print('Cannot use fusion-fcn-v2 model without the grss_dfc_2018 dataset!')
+                exit(1)
+            elif (hyperparams['model_id'] == '3d-densenet-fusion' 
+                and hyperparams['dataset'] != 'grss_dfc_2018'):
+                print('Cannot use 3d-densenet-fusion model without the grss_dfc_2018 dataset!')
                 exit(1)
 
             # Initialize random seed for sampling function
@@ -288,7 +352,6 @@ def run_test_harness(**hyperparams):
 
                     # Get dataset choice parameter
                     dataset_choice = hyperparams['dataset']
-                    class_results_file = f'{outfile_prefix}__{dataset_choice}__class_results.csv'
                     print()
                     print(f' < Dataset Chosen: {dataset_choice} >')
                     print()
@@ -296,6 +359,10 @@ def run_test_harness(**hyperparams):
                     # Make sure dataset is in per-class data list dictionary
                     if dataset_choice not in per_class_data_lists:
                         per_class_data_lists[dataset_choice] = []
+                    
+                    # Make sure dataset is in per-class data list dictionary
+                    if dataset_choice not in per_class_selected_band_lists:
+                        per_class_selected_band_lists[dataset_choice] = []
 
                     # Get selected dataset
                     if not reuse_last_dataset:
@@ -340,7 +407,104 @@ def run_test_harness(**hyperparams):
                         print('-------------------------------------------------------------------')
                         print('RUN BAND SELECTION ALGORITHM')
                         print('-------------------------------------------------------------------')
-                        data = band_selection(data, dataset_info['class_labels'], **hyperparams)
+                        #TODO - allow per-modality band selection
+
+                        if hyperparams['select_only_hs_bands']:
+                            hs_channels = dataset_info['hs_channels']
+                            if hs_channels is not None:
+                                # Get the non-hyperspectral data so it
+                                # can be appended to the reduced
+                                # hyperspectral data later
+                                non_hs_channels = [channel for channel in range(data.shape[-1]) if channel not in hs_channels]
+                                non_hs_data = data[..., non_hs_channels]
+                                data = data[..., hs_channels]
+
+                                hs_channel_labels = [label for channel, label in enumerate(dataset_info['channel_labels']) if channel in hs_channels]
+                                non_hs_channel_labels = [label for channel, label in enumerate(dataset_info['channel_labels']) if channel not in hs_channels]
+
+                                data, band_selection_time, bands_selected = band_selection(data, train_gt, **hyperparams)
+
+                                # Update the channel indices to reflect 
+                                # reduced HS data
+                                num_hs_channels = data.shape[-1]
+                                dataset_info['hs_channels'] = range(num_hs_channels)
+                                dataset_info['lidar_ms_channels'] = [new_channel + num_hs_channels for new_channel, channel in enumerate(non_hs_channels) if channel in dataset_info['lidar_ms_channels']]
+                                dataset_info['lidar_ndsm_channels'] = [new_channel + num_hs_channels for new_channel, channel in enumerate(non_hs_channels) if channel in dataset_info['lidar_ndsm_channels']]
+                                dataset_info['vhr_rgb_channels'] = [new_channel + num_hs_channels for new_channel, channel in enumerate(non_hs_channels) if channel in dataset_info['vhr_rgb_channels']]
+
+                                # Stack the non hyperspectral data onto
+                                # the data array
+                                data = np.dstack((data, non_hs_data))
+
+                                if bands_selected is not None:
+                                    # Initialize dictionary of band selection
+                                    # data to output to file
+                                    per_class_selected_bands = {
+                                        'experiment_number': iteration + 1, 
+                                        'experiment_name': experiment_name,
+                                        'random_seed': seed,
+                                        'band_reduction_method': hyperparams['band_reduction_method'],
+                                        'band_selection_time': band_selection_time,
+                                        'model': None, 
+                                        'overall_accuracy': 0.0, 
+                                        'average_accuracy': 0.0,
+                                        'precision_score': 0.0,
+                                        'recall_score': 0.0,
+                                        'cohen_kappa_score': 0.0,
+                                    }
+
+                                    
+                                    # Write selected bands to band selection
+                                    # dictionary
+                                    for channel, label in enumerate(hs_channel_labels):
+                                        if bands_selected is not None and channel in bands_selected:
+                                            per_class_selected_bands[f'{label} (channel {channel})'] = True
+                                        else:
+                                            per_class_selected_bands[f'{label} (channel {channel})'] = False
+                                    
+                                    for channel, label in enumerate(non_hs_channel_labels):
+                                        per_class_selected_bands[f'{label} (channel {channel + len(hs_channels)})'] = True
+
+                            else:
+                                print('There are no hyperspectral channels in this experiment! Skipping band selection...')
+                                
+                        else:
+                            data, band_selection_time, bands_selected = band_selection(data, train_gt, **hyperparams)
+
+                            if bands_selected is not None:
+                                per_class_selected_bands = {
+                                    'experiment_number': iteration + 1, 
+                                    'experiment_name': experiment_name,
+                                    'random_seed': seed,
+                                    'band_reduction_method': hyperparams['band_reduction_method'],
+                                    'band_selection_time': band_selection_time,
+                                    'model': None, 
+                                    'overall_accuracy': 0.0, 
+                                    'average_accuracy': 0.0,
+                                    'precision_score': 0.0,
+                                    'recall_score': 0.0,
+                                    'cohen_kappa_score': 0.0,
+                                }
+
+                                if dataset_info['channel_labels'] is not None:
+                                    for channel, label in enumerate(dataset_info['channel_labels']):
+                                        if bands_selected is not None and channel in bands_selected:
+                                            per_class_selected_bands[f'{label} (channel {channel})'] = True
+                                        else:
+                                            per_class_selected_bands[f'{label} (channel {channel})'] = False
+
+                                            # Remove any channels from
+                                            # modality channel lists if they
+                                            # are not selected
+                                            if channel in dataset_info['hs_channels']:
+                                                dataset_info['hs_channels'].remove(channel)
+                                            if channel in dataset_info['lidar_ms_channels']:
+                                                dataset_info['lidar_ms_channels'].remove(channel)
+                                            if channel in dataset_info['lidar_ndsm_channels']:
+                                                dataset_info['lidar_ndsm_channels'].remove(channel)
+                                            if channel in dataset_info['vhr_rgb_channels']:
+                                                dataset_info['vhr_rgb_channels'].remove(channel)
+
                         print('-------------------------------------------------------------------')
                         print()
 
@@ -375,13 +539,65 @@ def run_test_harness(**hyperparams):
                     branch_2_channels = (*lidar_ndsm_channels,)
                     branch_3_channels = (*hs_channels,)
                     input_channels = (branch_1_channels, branch_2_channels, branch_3_channels)
+                    input_sizes = [len(input_channel) for input_channel in input_channels]
+                elif (hyperparams['model_id'] == '3d-densenet-fusion'
+                      or hyperparams['model_id'] == '3d-densenet-fusion2'
+                      or hyperparams['model_id'] == '3d-densenet-fusion3'
+                      or hyperparams['model_id'] == '3d-densenet-fusion4'):
+                    # branch_1_channels = (*vhr_rgb_channels, )
+                    # branch_2_channels = (*lidar_ms_channels, *lidar_ndsm_channels, )
+                    # branch_3_channels = (*hs_channels, )
+                    # input_channels = (branch_1_channels, branch_2_channels, branch_3_channels)
+                    branch_1_channels = (*hs_channels, )
+                    branch_2_channels = (*lidar_ms_channels, )
+                    branch_3_channels = (*lidar_ndsm_channels, )
+                    branch_4_channels = (*vhr_rgb_channels, )
+                    input_channels = (branch_1_channels, branch_2_channels, branch_3_channels, branch_4_channels)
+                    input_sizes = [len(input_channel) for input_channel in input_channels]
+                elif hyperparams['model_id'] == '3d-densenet-modified':
+                    if hyperparams['add_branch'] is not None:
+                        input_channels = []
+                        branch_list = []
+                        for branch in hyperparams['add_branch']:
+                            branch_channels = []
+                            branch_modalities = []
+                            for modality in str(branch).split(','):
+                                if modality == 'hs' and (hyperparams['use_hs_data'] or hyperparams['use_all_data']):
+                                    branch_channels += [*hs_channels, ]
+                                elif modality == 'lidar_ms' and (hyperparams['use_lidar_ms_data'] or hyperparams['use_all_data']):
+                                    branch_channels += [*lidar_ms_channels, ]
+                                elif modality == 'lidar_ndsm' and (hyperparams['use_lidar_ndsm_data'] or hyperparams['use_all_data']):
+                                    branch_channels += [*lidar_ndsm_channels, ]
+                                elif modality == 'vhr_rgb' and (hyperparams['use_vhr_data'] or hyperparams['use_all_data']):
+                                    branch_channels += [*vhr_rgb_channels, ]
+                                
+                                branch_modalities.append(modality)
+                            branch_list.append(branch_modalities)
+                            if len(branch_channels) > 0:
+                                input_channels.append(branch_channels)
+                        
+                        for index, modalities in enumerate(branch_list):
+                            print(f'Branch {index} modalities: {modalities}')
+
+                        if len(input_channels) > 0:
+                            input_sizes = [len(input_channel) for input_channel in input_channels]
+                        else:
+                            input_channels = None
+                            input_sizes = [img_channels]
+
+                    else:
+                        input_channels = None
+                        input_sizes = [img_channels]
+                    
                 else:
                     input_channels = None
+                    input_sizes = None
 
                 # Check to see if model uses 3d convolutions - if so
                 # then the input dimensions will need to be expanded
                 # to include the 'planes' dimension
                 if (hyperparams['model_id'] == '3d-densenet'
+                    # or hyperparams['model_id'] == '3d-densenet-fusion'
                     or hyperparams['model_id'] == '3d-cnn'):
                     expand_dims = True
                 else:
@@ -408,9 +624,11 @@ def run_test_harness(**hyperparams):
 
                 # Update experiment data
                 experiment_data.update({
-                    'experiment_name': experiment_name,
                     'random_seed': seed,
                     'dataset': dataset_name,
+                    'band_reduction_method': hyperparams['band_reduction_method'],
+                    'band_selection_time': band_selection_time,
+                    'bands_selected': bands_selected,
                     'channels': img_channels,
                     'device': device_name,
                     'epochs': epochs,
@@ -425,6 +643,9 @@ def run_test_harness(**hyperparams):
                 # Update per-class data for experiment
                 per_class_data.update({
                     'random_seed': seed,
+                    'band_reduction_method': hyperparams['band_reduction_method'],
+                    'band_selection_time': band_selection_time,
+                    'bands_selected': bands_selected,
                 })
                 for label in all_class_labels:
                     per_class_data[label] = 0.0
@@ -465,6 +686,86 @@ def run_test_harness(**hyperparams):
                                     img_cols=img_cols, 
                                     img_channels=img_channels, 
                                     nb_classes=num_classes)
+                elif hyperparams['model_id'] == '3d-densenet-modified':
+                    model = densenet_3d_modified_model(img_rows=img_rows, 
+                                                       img_cols=img_cols, 
+                                                       img_channels_list=input_sizes, 
+                                                       nb_classes=num_classes, 
+                                                       num_dense_blocks=3,
+                                                       growth_rate=32, 
+                                                       num_1x1_convs=0,
+                                                       first_conv_filters=64,
+                                                       first_conv_kernel=(5,5,5),
+                                                       dropout_1=0.5,
+                                                       dropout_2=0.5,
+                                                       activation='leaky_relu')
+                elif hyperparams['model_id'] == '3d-densenet-fusion':
+                    model = densenet_3d_modified_model(img_rows=img_rows, 
+                                                       img_cols=img_cols, 
+                                                       img_channels_list=input_sizes, 
+                                                       nb_classes=num_classes, 
+                                                       num_dense_blocks=3,
+                                                       growth_rate=32, 
+                                                       num_1x1_convs=0,
+                                                       first_conv_filters=64,
+                                                       first_conv_kernel=(5,5,5),
+                                                       dropout_1=0.5,
+                                                       dropout_2=0.5,
+                                                       activation='leaky_relu')
+                elif hyperparams['model_id'] == '3d-densenet-fusion2':
+                    model = densenet_3d_fusion_model2(img_rows=img_rows, 
+                                                     img_cols=img_cols, 
+                                                     img_channels_list=[
+                                                            len(hs_channels), 
+                                                            len(lidar_ms_channels),
+                                                            len(lidar_ndsm_channels), 
+                                                            len(vhr_rgb_channels),
+                                                     ], 
+                                                     nb_classes=num_classes, 
+                                                     num_dense_blocks=3)
+                elif hyperparams['model_id'] == '3d-densenet-fusion3':
+                    model = densenet_3d_fusion_model3(img_rows=img_rows, 
+                                                     img_cols=img_cols, 
+                                                     img_channels_list=[
+                                                            len(hs_channels), 
+                                                            len(lidar_ms_channels),
+                                                            len(lidar_ndsm_channels), 
+                                                            len(vhr_rgb_channels),
+                                                     ], 
+                                                     nb_classes=num_classes, 
+                                                     num_dense_blocks=3)
+                # elif hyperparams['model_id'] == '3d-densenet-fusion':
+                #     model = densenet_3d_fusion_model(img_rows=img_rows, 
+                #                                      img_cols=img_cols, 
+                #                                      img_channels_1=len(vhr_rgb_channels), 
+                #                                      img_channels_2=len(lidar_ms_channels) + len(lidar_ndsm_channels), 
+                #                                      img_channels_3=len(hs_channels), 
+                #                                      nb_classes=num_classes, 
+                #                                      num_dense_blocks=3)
+                # elif hyperparams['model_id'] == '3d-densenet-fusion2':
+                #     model = densenet_3d_fusion_model2(img_rows=img_rows, 
+                #                                      img_cols=img_cols, 
+                #                                      img_channels_1=len(vhr_rgb_channels), 
+                #                                      img_channels_2=len(lidar_ms_channels) + len(lidar_ndsm_channels), 
+                #                                      img_channels_3=len(hs_channels), 
+                #                                      nb_classes=num_classes, 
+                #                                      num_dense_blocks=3)
+                # elif hyperparams['model_id'] == '3d-densenet-fusion3':
+                #     model = densenet_3d_fusion_model3(img_rows=img_rows, 
+                #                                      img_cols=img_cols, 
+                #                                      img_channels_1=len(vhr_rgb_channels), 
+                #                                      img_channels_2=len(lidar_ms_channels) + len(lidar_ndsm_channels), 
+                #                                      img_channels_3=len(hs_channels), 
+                #                                      nb_classes=num_classes, 
+                #                                      num_dense_blocks=3)
+                # elif hyperparams['model_id'] == '3d-densenet-fusion4':
+                #     model = densenet_3d_fusion_model4(img_rows=img_rows, 
+                #                                      img_cols=img_cols, 
+                #                                      img_channels_1=len(vhr_rgb_channels), 
+                #                                      img_channels_2=len(lidar_ms_channels) + len(lidar_ndsm_channels), 
+                #                                      img_channels_3=len(hs_channels), 
+                #                                      nb_classes=num_classes, 
+                #                                      num_dense_blocks=3)
                 elif hyperparams['model_id'] == '2d-cnn':
                     model = cnn_2d_model(img_rows=img_rows, 
                                     img_cols=img_cols, 
@@ -521,20 +822,30 @@ def run_test_harness(**hyperparams):
                 # Record model name for output
                 experiment_data['model'] = model.name
                 per_class_data['model'] = model.name
+                if per_class_selected_bands is not None:
+                    per_class_selected_bands['model'] = model.name
+
+                if hyperparams['restore'] is not None:
+                    print(f'Restoring {model.name} weights from {hyperparams["restore"]}')
+                    model.load_weights(hyperparams['restore'])
+
 
                 print('-------------------------------------------------------------------')
                 print()
                 
-                print('-------------------------------------------------------------------')
-                print('TRAIN MODEL')
-                print('-------------------------------------------------------------------')
+                if not hyperparams['predict_only'] or hyperparams['predict_only'] is None:
+                    print('-------------------------------------------------------------------')
+                    print('TRAIN MODEL')
+                    print('-------------------------------------------------------------------')
 
-                # Run experiment on model
-                model, model_train_time = train_model(model=model, 
-                                                      train_dataset=train_dataset, 
-                                                      val_dataset=val_dataset,  
-                                                      iteration=iteration,
-                                                      **hyperparams)
+                    # Run experiment on model
+                    model, model_train_time = train_model(model=model, 
+                                                        train_dataset=train_dataset, 
+                                                        val_dataset=val_dataset,  
+                                                        iteration=iteration,
+                                                        **hyperparams)
+                else:
+                    model_train_time = None
 
                 print('-------------------------------------------------------------------')
                 print('TEST MODEL')
@@ -600,6 +911,13 @@ def run_test_harness(**hyperparams):
 
                 for index, acc in enumerate(experiment_results['per_class_accuracies']):
                     per_class_data[experiment_results['labels'][index]] = acc
+                
+                if per_class_selected_bands is not None:
+                    per_class_selected_bands['overall_accuracy'] = experiment_results['overall_accuracy']
+                    per_class_selected_bands['average_accuracy'] = experiment_results['average_accuracy']
+                    per_class_selected_bands['precision_score'] = experiment_results['precision_score']
+                    per_class_selected_bands['recall_score'] = experiment_results['recall_score']
+                    per_class_selected_bands['cohen_kappa_score'] = experiment_results['cohen_kappa_score']
 
                 # Output experimental results
                 output_experiment_results(experiment_results)
@@ -655,20 +973,34 @@ def run_test_harness(**hyperparams):
         
         experiment_data_list.append(experiment_data)
         per_class_data_lists[dataset_choice].append(per_class_data)
+        if per_class_selected_bands is not None:
+            per_class_selected_band_lists[dataset_choice].append(per_class_selected_bands)
 
         print()
         print('-------------------------------------------------------------------')
         print('SAVING RESULTS...')
 
         experiment_results = pd.DataFrame(experiment_data_list)
+        experiment_results.set_index('experiment_number', inplace=True)
         experiment_results.to_csv(os.path.join(output_path, experiments_results_file))
         
         print('  >>> Experiment results saved!')
 
         for dataset_choice in per_class_data_lists:
-            per_class_data_results = pd.DataFrame(per_class_data_lists[dataset_choice])
-            per_class_data_results.to_csv(os.path.join(output_path, class_results_file))
-            print(f'  >>> {dataset_choice} per-class results saved!')
+            if len(per_class_data_lists[dataset_choice]) > 0:
+                file_name = f'{outfile_prefix}__{dataset_choice}__class_results.csv'
+                per_class_data_results = pd.DataFrame(per_class_data_lists[dataset_choice])
+                per_class_data_results.set_index('experiment_number', inplace=True)
+                per_class_data_results.to_csv(os.path.join(output_path, file_name))
+                print(f'  >>> {dataset_choice} per-class results saved!')
+
+        for dataset_choice in per_class_selected_band_lists:
+            if len(per_class_selected_band_lists[dataset_choice]) > 0:
+                file_name = f'{outfile_prefix}__{dataset_choice}__selected_band_results.csv'
+                per_class_selected_band_results = pd.DataFrame(per_class_selected_band_lists[dataset_choice])
+                per_class_selected_band_results.set_index('experiment_number', inplace=True)
+                per_class_selected_band_results.to_csv(os.path.join(output_path, file_name))
+                print(f'  >>> {dataset_choice} per-class selected band results saved!')
 
         print('RESULTS SAVED!')
         print('-------------------------------------------------------------------')

@@ -37,7 +37,7 @@ from data.grss_dfc_2018_uh import UH_2018_Dataset
 
 ### Class Definitions ###
 class HyperspectralDataset(Sequence):
-    def __init__(self, data, gt, shuffle=True, **params):
+    def __init__(self, data, gt, shuffle=True, equal_class_distribution=False, **params):
         """
         Args:
             data: 3D hyperspectral image
@@ -50,6 +50,7 @@ class HyperspectralDataset(Sequence):
         self.input_channels = params['input_channels']
         self.gt = gt
         self.shuffle = shuffle
+        self.equal_class_distribution = equal_class_distribution
         self.batch_size = params['batch_size']
         self.patch_size = params['patch_size']
         self.supervision = params['supervision']
@@ -89,12 +90,43 @@ class HyperspectralDataset(Sequence):
 
         self.labels = np.array([gt[x, y] for x, y in self.indices])
 
+        self.sample_set = {label:[] for label in np.unique(self.gt) if label not in self.ignored_labels}
+
+        for index in self.indices:
+            self.sample_set[self.gt[tuple(index)]].append(tuple(index))
+
+        self.num_samples_to_select = None
+        for key, class_samples in self.sample_set.items():
+            num_samples = len(class_samples)
+            if self.num_samples_to_select is None or self.num_samples_to_select > num_samples:
+                self.num_samples_to_select = num_samples
+
         # Run epoch end function to initialize dataset
         self.on_epoch_end()
 
     def on_epoch_end(self):
-        if self.shuffle:
+        if self.equal_class_distribution:
+            # Randomly pick an equal number of indices from each class
+            # to be used in the training for this epoch
+            self.indices = np.array(
+                [index for key in self.sample_set 
+                    for index in np.random.default_rng().choice(self.sample_set[key], 
+                                                            self.num_samples_to_select, 
+                                                            axis=0, 
+                                                            replace=False)]
+            )
+
+            # Make sure to shuffle all of the different class indices
+            # around and apply the appropriate labels for those indices
             np.random.shuffle(self.indices)
+            self.labels = np.array([self.gt[x, y] for x, y in self.indices])
+
+        elif self.shuffle:
+            # Shuffle the indices around and apply the appropriate
+            # labels for those indices
+            np.random.shuffle(self.indices)
+            self.labels = np.array([self.gt[x, y] for x, y in self.indices])
+            
 
     def __len__(self):
         return math.ceil(len(self.indices) / self.batch_size)
@@ -540,6 +572,8 @@ def load_grss_dfc_2018_uh_dataset(**hyperparams):
     """
     """
 
+    path_to_dataset = hyperparams['path_to_dataset']
+
     skip_data_preprocessing = hyperparams['skip_data_preprocessing']
     
     hs_resampling = hyperparams['hs_resampling']
@@ -584,11 +618,15 @@ def load_grss_dfc_2018_uh_dataset(**hyperparams):
     vhr_rgb_channels = []
 
 
-    dataset = UH_2018_Dataset()
+    if path_to_dataset is not None:
+        dataset = UH_2018_Dataset(dataset_path=path_to_dataset)
+    else:
+        dataset = UH_2018_Dataset()
     train_gt = dataset.load_full_gt_image(train_only=True)
     test_gt = dataset.load_full_gt_image(test_only=True)
 
     data = None
+    channel_labels = None
 
     # Check to see if hyperspectral data is being used
     if use_hs_data:
@@ -614,9 +652,11 @@ def load_grss_dfc_2018_uh_dataset(**hyperparams):
         if data is None:
             hs_channels = range(hs_data.shape[-1])
             data = np.copy(hs_data)
+            channel_labels = dataset.hs_band_wavelength_labels
         else:
             hs_channels = [x + data.shape[-1] for x in range(hs_data.shape[-1])]
             data = np.dstack((data, hs_data))
+            channel_labels = channel_labels + dataset.hs_band_wavelength_labels
 
     # Check to see if lidar multispectral intensity data is being used
     if use_lidar_ms_data:
@@ -643,9 +683,11 @@ def load_grss_dfc_2018_uh_dataset(**hyperparams):
         if data is None:
             lidar_ms_channels = range(lidar_ms_data.shape[-1])
             data = np.copy(lidar_ms_data)
+            channel_labels = dataset.lidar_ms_band_wavelength_labels
         else:
             lidar_ms_channels = [x + data.shape[-1] for x in range(lidar_ms_data.shape[-1])]
             data = np.dstack((data, lidar_ms_data))
+            channel_labels = channel_labels + dataset.lidar_ms_band_wavelength_labels
 
     # Check to see if lidar normalized digital surface model data is
     # being used
@@ -692,9 +734,11 @@ def load_grss_dfc_2018_uh_dataset(**hyperparams):
         if data is None:
             lidar_ndsm_channels = [0]
             data = np.copy(lidar_ndsm_data)
+            channel_labels = ['NDSM']
         else:
             lidar_ndsm_channels = [data.shape[-1]]
             data = np.dstack((data, lidar_ndsm_data))
+            channel_labels = channel_labels + ['NDSM']
 
     # Check to see if very high resolution RGB image data is being used
     if use_vhr_data:
@@ -721,9 +765,11 @@ def load_grss_dfc_2018_uh_dataset(**hyperparams):
         if data is None:
             vhr_rgb_channels = range(vhr_data.shape[-1])
             data = np.copy(vhr_data)
+            channel_labels = ['vhr_red', 'vhr_green', 'vhr_blue']
         else:
             vhr_rgb_channels = [x + data.shape[-1] for x in range(vhr_data.shape[-1])]
             data = np.dstack((data, vhr_data))
+            channel_labels = channel_labels + ['vhr_red', 'vhr_green', 'vhr_blue']
     
     # Verify that some data was loaded
     if data is not None:
@@ -742,10 +788,11 @@ def load_grss_dfc_2018_uh_dataset(**hyperparams):
         'ignored_labels': dataset.gt_ignored_labels,
         'class_labels': dataset.gt_class_label_list,
         'label_mapping': dataset.gt_class_value_mapping,
-        'hs_channels': hs_channels,
-        'lidar_ms_channels': lidar_ms_channels,
-        'lidar_ndsm_channels': lidar_ndsm_channels,
-        'vhr_rgb_channels': vhr_rgb_channels,
+        'hs_channels': list(hs_channels),
+        'lidar_ms_channels': list(lidar_ms_channels),
+        'lidar_ndsm_channels': list(lidar_ndsm_channels),
+        'vhr_rgb_channels': list(vhr_rgb_channels),
+        'channel_labels': channel_labels,
     }
 
     return data, train_gt, test_gt, dataset_info
@@ -784,6 +831,7 @@ def load_indian_pines_dataset(**hyperparams):
         'ignored_labels': [0],
         'class_labels': labels,
         'label_mapping': {index: label for index, label in enumerate(labels)},
+        'channel_labels': None,
     }
 
     return data, train_gt, test_gt, dataset_info
@@ -815,6 +863,7 @@ def load_pavia_center_dataset(**hyperparams):
         'ignored_labels': [0],
         'class_labels': labels,
         'label_mapping': {index: label for index, label in enumerate(labels)},
+        'channel_labels': None,
     }
 
     return data, train_gt, test_gt, dataset_info
@@ -846,6 +895,7 @@ def load_university_of_pavia_dataset(**hyperparams):
         'ignored_labels': [0],
         'class_labels': labels,
         'label_mapping': {index: label for index, label in enumerate(labels)},
+        'channel_labels': None,
     }
 
     return data, train_gt, test_gt, dataset_info
@@ -877,7 +927,8 @@ def create_datasets(data, train_gt, test_gt, **hyperparams):
     print(f'padded test_gt shape: {test_gt.shape}')
 
     # Create validation dataset from training set
-    train_gt, val_gt = sample_gt(train_gt, train_split, mode=split_mode)
+    if train_split is not None and train_split != 1.0:
+        train_gt, val_gt = sample_gt(train_gt, train_split, mode=split_mode)
 
     dataset_params = (
         'input_channels', 
@@ -897,13 +948,16 @@ def create_datasets(data, train_gt, test_gt, **hyperparams):
     # Create dataset parameter subset from hyperparameters
     params = {param: hyperparams[param] for param in dataset_params}
 
-    train_dataset = HyperspectralDataset(data, train_gt, **params)
+    train_dataset = HyperspectralDataset(data, train_gt, equal_class_distribution=True, **params)
 
     # Don't use augmentation for validation and test sets
-    # params['flip_augmentation'] = False
-    # params['radiation_augmentation'] = False
-    # params['mixture_augmentation'] = False
-    val_dataset = HyperspectralDataset(data, val_gt, **params)
+    params['flip_augmentation'] = False
+    params['radiation_augmentation'] = False
+    params['mixture_augmentation'] = False
+    if train_split is not None and train_split != 1.0:
+        val_dataset = HyperspectralDataset(data, val_gt, shuffle=False, **params)
+    else:
+        val_dataset = None
 
     # If postprocessing is going to occur, change supervision parameter 
     # to 'semi' so all pixels are used (so we can predict the full 
