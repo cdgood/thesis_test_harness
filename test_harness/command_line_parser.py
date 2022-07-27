@@ -18,8 +18,6 @@ Usage: command_line_parser.py
 ### Built-in Imports ###
 import argparse
 
-from numpy import append
-
 ### Other Library Imports ###
 #TODO
 

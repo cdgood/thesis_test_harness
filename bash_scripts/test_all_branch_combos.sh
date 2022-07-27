@@ -250,7 +250,7 @@ if [ $end_arg -gt 0 ]; then
 fi
 
 begin_run=0
-if [ $begin_run_arg -gt 0]; then
+if [ $begin_run_arg -gt 0 ]; then
     begin_run=$begin_run_arg
 fi
 
@@ -262,10 +262,10 @@ do
     if [ $i -gt 0 ]; then
         for (( j=1 ; j<=$runs ; j++ ))
         do
-            if [ $i -ne $start || $j -ge $begin_run ]; then
+            if [[ $i -ne $start || $j -ge $begin_run ]]; then
 
-                experiment_num=$(( ( $i - 1 ) * $runs + $j))
-                python main.py --experiment-name ${experiment_titles[$i]}_run$j --experiment-number $experiment_num --output-path $working_dir --save-experiment-path "${save_experiment_path}${experiment_titles[$i]}_run${j}.json" ${experiments[$i]} $flags
+                experiment_num=$(( ( $i - 1 ) * $runs + $j ))
+                python main.py --experiment-name ${experiment_titles[$i]}_run$j --experiment-number $experiment_num --output-path $working_dir --save-experiment-path "${save_experiment_path}${experiment_titles[$i]}.json" ${experiments[$i]} $flags
 
                 mv "${working_dir}"*.csv "${working_dir}results/"
                 mv "${working_dir}"*.hdf5 "${working_dir}checkpoints/"

@@ -227,9 +227,9 @@ def save_sample_pixel_profiles(sample_pixels, class_labels, channel_labels, chan
                 # Set up vertical bar graph plot
                 plt.figure(figsize=(12,9))
                 bar = plt.bar(channel_list, channels, color=channel_colors)
-                plt.bar_label(bar, channels, rotation='vertical')
-                plt.grid(color='grey', linestyle='-', linewidth=1, axis='y')
-                plt.xticks(channel_list, channel_labels, rotation='vertical')
+                # plt.bar_label(bar, channels, rotation='vertical')
+                plt.grid(color='white', linestyle='-', linewidth=1, axis='y')
+                plt.xticks(channel_list, channel_list, rotation='vertical')
                 plt.xlabel('Channel')
                 plt.ylim(0, 16000)
                 plt.ylabel('Intensity')
@@ -252,9 +252,9 @@ def save_sample_pixel_profiles(sample_pixels, class_labels, channel_labels, chan
                 # Set up horizontal bar graph plot
                 plt.figure(figsize=(12,9))
                 bar = plt.barh(channel_list, channels, color=channel_colors)
-                plt.bar_label(bar, channels)
-                plt.grid(color='grey', linestyle='-', linewidth=1, axis='x')
-                plt.yticks(channel_list, channel_labels)
+                # plt.bar_label(bar, channels)
+                plt.grid(color='white', linestyle='-', linewidth=1, axis='x')
+                plt.yticks(channel_list, channel_list)
                 plt.ylabel('Channel')
                 plt.xlim(0, 16000)
                 plt.xlabel('Intensity')
@@ -446,6 +446,12 @@ def create_class_average_profiles(dataset, output_path='./'):
 
     rows, columns = dataset.gt_image.shape[0:2]
 
+    dataset.lidar_ms_image[~np.isfinite(dataset.lidar_ms_image)] = 0
+
+    hs_limit = round(np.nanpercentile(dataset.hs_image, 95))
+    lidar_ms_limit = round(np.nanpercentile(dataset.lidar_ms_image, 99.9))
+    vhr_rgb_limit = 255
+
     for r in range(rows):
         for c in range(columns):
 
@@ -484,14 +490,14 @@ def create_class_average_profiles(dataset, output_path='./'):
             plt.bar(hs_band_indices, 
                     hs_avg_class_intensity[label], 
                     color=dataset.hs_band_rgb_list)
-            plt.grid(color='grey', linestyle='-', linewidth=1, axis='y')
+            plt.grid(color='white', linestyle='-', linewidth=1, axis='y')
             plt.xticks(hs_band_indices, 
-                       dataset.hs_band_wavelength_labels, 
+                       hs_band_indices, 
                        rotation='vertical')
-            plt.xlabel('Wavelength')
-            plt.ylim(0, 8000)
+            plt.xlabel('Channel')
+            plt.ylim(0, hs_limit)
             plt.ylabel('Intensity')
-            plt.title(f'Average HS wavelength for {dataset.gt_class_label_list[label]}')
+            plt.title(f'Average HS reflectance profile for {dataset.gt_class_label_list[label]}')
             plt.tight_layout()
 
             file_path = os.path.join(output_path, 
@@ -516,7 +522,7 @@ def create_class_average_profiles(dataset, output_path='./'):
                        dataset.lidar_ms_band_wavelength_labels, 
                        rotation='vertical')
             plt.xlabel('Wavelength')
-            plt.ylim(0, 8000)
+            plt.ylim(0, lidar_ms_limit)
             plt.ylabel('Intensity')
             plt.title(f'Average LiDAR MS wavelength for {dataset.gt_class_label_list[label]}')
             plt.tight_layout()
@@ -542,7 +548,7 @@ def create_class_average_profiles(dataset, output_path='./'):
                        dataset.vhr_channel_labels, 
                        rotation='vertical')
             plt.xlabel('Wavelength')
-            plt.ylim(0, 255)
+            plt.ylim(0, vhr_rgb_limit)
             plt.ylabel('Intensity')
             plt.title(f'Average RGB intensity for {dataset.gt_class_label_list[label]}')
             plt.tight_layout()
@@ -828,14 +834,14 @@ if __name__ == "__main__":
                                       ignored_labels, 
                                       class_labels, 
                                       channel_labels=channel_labels)
-    save_dataframe_descriptions(dataframes, 
-                                output_path='./analysis/grss_dfc_2018/descriptions/')
-    get_sns_violin_plots(dataframes, 
-                         output_path='./analysis/grss_dfc_2018/violin_plots/', 
-                         show_figures=show_figures)
-    get_sns_box_plots(dataframes, 
-                      output_path='./analysis/grss_dfc_2018/box_plots/', 
-                      show_figures=show_figures)
+    # save_dataframe_descriptions(dataframes, 
+    #                             output_path='./analysis/grss_dfc_2018/descriptions/')
+    # get_sns_violin_plots(dataframes, 
+    #                      output_path='./analysis/grss_dfc_2018/violin_plots/', 
+    #                      show_figures=show_figures)
+    # get_sns_box_plots(dataframes, 
+    #                   output_path='./analysis/grss_dfc_2018/box_plots/', 
+    #                   show_figures=show_figures)
 
     # create_hs_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')
     # create_lidar_ms_data_csv(output_path='./analysis/grss_dfc_2018/dataset_csvs')

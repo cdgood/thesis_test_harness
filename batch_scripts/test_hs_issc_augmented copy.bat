@@ -37,7 +37,6 @@ for /l %%d in (0, 1, %num_dirs%) do (
 
 
 :: Set parameter values
-set runs=3
 set max_num_channels=48
 set random_seed=13
 set epochs=100
@@ -59,29 +58,22 @@ set flags=--cuda 0 --dataset grss_dfc_2018 --skip-data-postprocessing --model-id
 
 :: Run Experiments
 set /A end=%max_num_channels%
-set start_band=27
-set start_run=3
-for /l %%x in (%start_band%, 1, %end%) do (
-
-    for /l %%y in (1, 1, %runs%) do (
-        set /A "experiment_num=(%%x - 1) * %runs% + %%y"
-        if %%x LSS %max_num_channels% (
-            set experiment=%test_name%%title_params%_%%x_bands_run%%y
-            python main.py --experiment-name !experiment! --experiment-number !experiment_num! --output-path %working_dir% --save-experiment-path "%save_experiment_path%!experiment!.json" --band-reduction-method issc --n-components %%x %flags% 
-        ) else ( if %%x EQU %max_num_channels% (
-            set experiment=%test_name%%title_params%_all_bands_run%%y
-            python main.py --experiment-name !experiment! --experiment-number !experiment_num! --output-path %working_dir% --save-experiment-path "%save_experiment_path%!experiment!.json" --skip-band-selection %flags% 
-        ))
-        
-        
-        if %%x LEQ %max_num_channels% (
-            move %working_dir%*.csv %working_dir%results\
-            move %working_dir%*.hdf5 %working_dir%checkpoints\
-            move %working_dir%*.png %working_dir%images\
-            move %working_dir%*.txt %working_dir%training_summaries\
-        )
-    )
+for /l %%x in (1, 1, %end%) do (
+    if %%x LSS %max_num_channels% (
+        set experiment=%test_name%%title_params%_%%x_bands
+        python main.py --experiment-name !experiment! --experiment-number %%x --output-path %working_dir% --save-experiment-path "%save_experiment_path%!experiment!.json" --band-reduction-method issc --n-components %%x %flags% 
+    ) else ( if %%x EQU %max_num_channels% (
+        set experiment=%test_name%%title_params%_all_bands
+        python main.py --experiment-name !experiment! --experiment-number %%x --output-path %working_dir% --save-experiment-path "%save_experiment_path%!experiment!.json" --skip-band-selection %flags% 
+    ))
     
+    
+    if %%x LEQ %max_num_channels% (
+        move %working_dir%*.csv %working_dir%results\
+        move %working_dir%*.hdf5 %working_dir%checkpoints\
+        move %working_dir%*.png %working_dir%images\
+        move %working_dir%*.txt %working_dir%training_summaries\
+    )
 )
 
 

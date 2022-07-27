@@ -57,35 +57,59 @@ set vhr_rgb_flags=--use-vhr-data --vhr-resampling cubic_spline
 set flags=--cuda 0 --dataset grss_dfc_2018 --skip-data-postprocessing --model-id 3d-densenet-modified --center-pixel --split-mode fixed --optimizer nadam --flip-augmentation --radiation-augmentation --mixture-augmentation %training_params% %hs_flags%
 
 :: Set experiments
+@REM set titles[0]=test_remove_
+@REM set experiment_flags[0]=%flags% %hs_flags% --band-reduction-method manual --n-components 48 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
+
+@REM set titles[1]=test_top_10_selected
+@REM set experiment_flags[1]=%flags% %hs_flags% --band-reduction-method manual --n-components 10 --selected-bands 6 14 16 19 27 32 37 43
+
+@REM set titles[2]=test_remove_21-23
+@REM set experiment_flags[2]=%flags% %hs_flags% --band-reduction-method manual --n-components 45 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
+
+@REM set titles[3]=test_remove_26-28
+@REM set experiment_flags[3]=%flags% %hs_flags% --band-reduction-method manual --n-components 45 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
+
+@REM set titles[4]=test_remove_21-23_26-28
+@REM set experiment_flags[4]=%flags% %hs_flags% --band-reduction-method manual --n-components 42 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
+
+@REM set titles[5]=test_remove_40
+@REM set experiment_flags[5]=%flags% %hs_flags% --band-reduction-method manual --n-components 47 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 41 42 43 44 45 46 47
+
+@REM set titles[6]=test_remove_36-44
+@REM set experiment_flags[6]=%flags% %hs_flags% --band-reduction-method manual --n-components 39 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 45 46 47
+
+@REM set titles[7]=test_remove_21-23_26-28_40
+@REM set experiment_flags[7]=%flags% %hs_flags% --band-reduction-method manual --n-components 41 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 29 30 31 32 33 34 35 36 37 38 39 41 42 43 44 45 46 47
+
+@REM set titles[8]=test_remove_21-23_26-28_36-44
+@REM set experiment_flags[8]=%flags% %hs_flags% --band-reduction-method manual --n-components 33 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 29 30 31 32 33 34 35 45 46 47
+
+
+@REM set num_experiments=8
+
+
 set titles[0]=test_remove_
 set experiment_flags[0]=%flags% %hs_flags% --band-reduction-method manual --n-components 48 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
 
-set titles[1]=test_top_10_selected
-set experiment_flags[1]=%flags% %hs_flags% --band-reduction-method manual --n-components 10 --selected-bands 6 14 16 19 27 32 37 43
+set titles[1]=test_remove_0_and_40
+set experiment_flags[1]=%flags% %hs_flags% --band-reduction-method manual --n-components 46 --selected-bands 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 41 42 43 44 45 46 47
 
-set titles[2]=test_remove_21-23
-set experiment_flags[2]=%flags% %hs_flags% --band-reduction-method manual --n-components 45 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
+set titles[2]=test_remove_0
+set experiment_flags[2]=%flags% %hs_flags% --band-reduction-method manual --n-components 47 --selected-bands 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
 
-set titles[3]=test_remove_26-28
-set experiment_flags[3]=%flags% %hs_flags% --band-reduction-method manual --n-components 45 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
-
-set titles[4]=test_remove_21-23_26-28
-set experiment_flags[4]=%flags% %hs_flags% --band-reduction-method manual --n-components 42 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 29 30 31 32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47
-
-set titles[5]=test_remove_40
-set experiment_flags[5]=%flags% %hs_flags% --band-reduction-method manual --n-components 47 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 41 42 43 44 45 46 47
-
-set titles[6]=test_remove_36-44
-set experiment_flags[6]=%flags% %hs_flags% --band-reduction-method manual --n-components 39 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 45 46 47
-
-set titles[7]=test_remove_21-23_26-28_40
-set experiment_flags[7]=%flags% %hs_flags% --band-reduction-method manual --n-components 41 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 29 30 31 32 33 34 35 36 37 38 39 41 42 43 44 45 46 47
-
-set titles[8]=test_remove_21-23_26-28_36-44
-set experiment_flags[8]=%flags% %hs_flags% --band-reduction-method manual --n-components 33 --selected-bands 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 24 25 29 30 31 32 33 34 35 45 46 47
+set titles[3]=test_remove_0_and_40
+set experiment_flags[3]=%flags% %hs_flags% --band-reduction-method manual --n-components 46 --selected-bands 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 41 42 43 44 45 46 47
 
 
-set num_experiments=8
+
+@REM set titles[3]=test_top_10_selected_run2
+@REM set experiment_flags[3]=%flags% %hs_flags% --band-reduction-method manual --n-components 10 --selected-bands 6 14 16 19 27 32 37 43
+
+@REM set titles[4]=test_top_10_selected_run3
+@REM set experiment_flags[4]=%flags% %hs_flags% --band-reduction-method manual --n-components 10 --selected-bands 6 14 16 19 27 32 37 43
+
+
+set num_experiments=3
 
 :: Run Experiments
 for /l %%x in (1, 1, %num_experiments%) do (

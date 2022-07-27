@@ -1,0 +1,5 @@
+Modality,OA,AA,Kappa
+Hyperspectral,0.5654,0.5068,0.5395
+LiDAR Multispectral Intensity,0.6447,0.5712,0.6239
+LiDAR NDSM (Range Data),0.2881,0.25,0.2491
+VHR RGB,0.5034,0.4405,0.474

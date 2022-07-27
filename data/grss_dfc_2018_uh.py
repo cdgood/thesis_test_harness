@@ -2705,7 +2705,9 @@ class UH_2018_Dataset:
                                figsize=size)
         if (full_gt_overlay 
             or test_gt_overlay 
-            or train_gt_overlay): view.set_display_mode('overlay')
+            or train_gt_overlay): 
+            view.set_display_mode('overlay')
+            view.class_alpha = 0.5
         
         view.set_title(title)
 
