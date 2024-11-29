@@ -247,7 +247,7 @@ dependencies:
   - rsa=4.7.2=pyhd3eb1b0_1
   - scikit-image=0.19.2=py39h2e25243_0
   - scikit-learn=1.0.2=py39hf11a4ad_1
-  - scipy=1.7.3=py39h0a974cb_0
+  # - scipy=1.7.3=py39h0a974cb_0
   - scs=3.2.0=py39hc73de48_0
   - seaborn=0.11.2=pyhd3eb1b0_0
   - send2trash=1.8.0=pyhd3eb1b0_1
